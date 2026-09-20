@@ -22,6 +22,7 @@ import {
   contactsPath,
   cookieFromReq,
   createSession,
+  deleteContacts,
   destroySession,
   loginUser,
   registerUser,
@@ -430,12 +431,25 @@ Do not include any other text or introductory phrases.`,
     });
   });
 
+  app.post("/api/auth/reset", (req, res) => {
+    const user = currentUser(req);
+    if (user) {
+      clearLinkedIn(user.id);
+      deleteContacts(user.id);
+      extractJobs.delete(user.id);
+    }
+    persistSession(req, null);
+    destroySession(sidFromReq(req));
+    res.setHeader("Set-Cookie", "lb_sid=; Path=/; HttpOnly; Max-Age=0");
+    res.json({ success: true });
+  });
+
   // Check LinkedIn status via Agent Reach
   app.get('/api/linkedin/status', (req, res) => {
     const session = sessionFor(req);
     const user = currentUser(req);
     res.json({
-      connected: Boolean(session),
+      connected: Boolean(session?.sessionCookie),
       canExtract: Boolean(session?.sessionCookie),
       contactsReady: user ? existsSync(contactsPath(user.id)) : false,
       profile: session ? {
@@ -747,15 +761,6 @@ Do not include any other text or introductory phrases.`,
           }
         } catch (err) {
           console.warn('[linkedin] voyager connections', err);
-        }
-      }
-
-      if (!connections.length) {
-        const company = (linkedinSession as any).company || '';
-        const industry = (linkedinSession as any).industry || linkedinSession.headline || '';
-        if (company) {
-          connections = await wikidataCompanyPeers(company, industry);
-          if (connections.length) source = 'wikidata';
         }
       }
 

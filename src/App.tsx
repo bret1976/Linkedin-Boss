@@ -31,6 +31,7 @@ export default function App() {
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extractStatus, setExtractStatus] = useState<string>('');
+  const autoExtracted = useRef(false);
 
   const {
     status,
@@ -95,9 +96,9 @@ export default function App() {
     };
   }, [userProfile, status.connected]);
 
-  // Synchronize with active LinkedIn session if connected via Agent Reach
+  // Only a cookie session can load real contacts. Profile URL is identity, not a graph.
   useEffect(() => {
-    if (status.connected && status.profile) {
+    if (status.canExtract && status.profile) {
       const headline = status.profile.headline || '';
       const at = headline.match(/(?:at|@)\s+([^|,•]+)/i);
       const activeUser: UserUploadedProfile = {
@@ -112,7 +113,21 @@ export default function App() {
       setUserProfile(activeUser);
       setIsLoadingGlobe(true);
     }
-  }, [status.connected, status.profile]);
+  }, [status.canExtract, status.profile]);
+
+  const handleStartFresh = async () => {
+    autoExtracted.current = false;
+    await fetch('/api/auth/reset', { method: 'POST' });
+    setAccountEmail(null);
+    setUserProfile(null);
+    setSelectedProfile(null);
+    setProfiles([]);
+    setLiveNetworkMeta(null);
+    setNetworkError(null);
+    setExtractStatus('');
+    setExtracting(false);
+    await refreshLinkedInStatus();
+  };
 
   const activeOverlay = useMemo(() => {
     return DEFAULT_OVERLAYS.find(o => o.id === activeOverlayId) || DEFAULT_OVERLAYS[0];
@@ -173,7 +188,6 @@ export default function App() {
     }
   };
 
-  const autoExtracted = useRef(false);
   useEffect(() => {
     if (autoExtracted.current) return;
     if (!accountEmail || !status.canExtract || status.contactsReady || extracting) return;
@@ -298,6 +312,13 @@ export default function App() {
 
       {!userProfile ? (
         <div className="absolute inset-0 flex items-center justify-center bg-white text-gray-900 z-50">
+          <button
+            type="button"
+            onClick={() => void handleStartFresh()}
+            className="absolute top-6 right-6 text-[11px] uppercase tracking-wider text-gray-500 hover:text-gray-900"
+          >
+            Start fresh / sign out
+          </button>
           <IntroScreen
             onStart={(profile) => {
               setUserProfile(profile);
@@ -412,14 +433,11 @@ export default function App() {
                 </button>
               )}
               <button
-                onClick={() => {
-                  setUserProfile(null);
-                  setSelectedProfile(null);
-                }}
+                onClick={() => void handleStartFresh()}
                 className="px-4 py-2 text-[10px] text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700 tracking-widest uppercase transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Upload New Profile</span>
+                <span>Start fresh</span>
               </button>
             </motion.div>
           )}

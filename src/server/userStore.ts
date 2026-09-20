@@ -1,5 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import path from "path";
 
 export type StoredUser = {
@@ -130,6 +130,11 @@ export function clearLinkedIn(userId: string) {
 export function contactsPath(userId: string) {
   ensure();
   return path.join(contactsDir, `${userId}.csv`);
+}
+
+export function deleteContacts(userId: string) {
+  const csv = contactsPath(userId);
+  if (existsSync(csv)) unlinkSync(csv);
 }
 
 export function cookieFromReq(cookieHeader: string | undefined, name: string) {
