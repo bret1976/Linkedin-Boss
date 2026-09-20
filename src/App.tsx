@@ -7,14 +7,19 @@ import GraphOverlayControls from './components/GraphOverlayControls';
 import LoadingOverlay from './components/LoadingOverlay';
 import LinkedInButton from './components/LinkedInButton';
 import LinkedInModal from './components/LinkedInModal';
+import AuthScreen from './components/AuthScreen';
+import ContactsTable from './components/ContactsTable';
 import { useLinkedIn } from './hooks/useLinkedIn';
 import { LinkedInMatchProfile, UserUploadedProfile } from './types/knowledgeGraph';
 import { DEFAULT_OVERLAYS } from './data/networkGraphData';
 import { generateAnalyzedProfiles } from './utils/graphAnalysis';
-import { TOTAL_CARDS } from './data';
-import { Sparkles, RefreshCw, Layers, CheckCircle2, Globe2 } from 'lucide-react';
+import { Download, Loader2, RefreshCw, CheckCircle2, Globe2 } from 'lucide-react';
+
+const GLOBE_LIMIT = 80;
 
 export default function App() {
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [userProfile, setUserProfile] = useState<UserUploadedProfile | null>(null);
   const [selectedProfile, setSelectedProfile] = useState<LinkedInMatchProfile | null>(null);
   const [isLoadingGlobe, setIsLoadingGlobe] = useState(false);
@@ -24,6 +29,8 @@ export default function App() {
   const [connectNotification, setConnectNotification] = useState<string | null>(null);
   const [liveNetworkMeta, setLiveNetworkMeta] = useState<{ isLive: boolean; totalFound: number; source?: string } | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extractStatus, setExtractStatus] = useState<string>('');
 
   const {
     status,
@@ -34,6 +41,15 @@ export default function App() {
     connect: connectLinkedIn,
     disconnect: disconnectLinkedIn
   } = useLinkedIn();
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success && d.user?.email) setAccountEmail(d.user.email);
+      })
+      .finally(() => setAuthChecked(true));
+  }, []);
 
   // Fetch live network connections from LinkedIn session or synthesize from userProfile
   useEffect(() => {
@@ -50,7 +66,7 @@ export default function App() {
           if (netRes.ok) {
             const netData = await netRes.json();
             if (!isCancelled && Array.isArray(netData.connections) && netData.connections.length > 0) {
-              const analyzed = generateAnalyzedProfiles(userProfile, TOTAL_CARDS, netData.connections);
+              const analyzed = generateAnalyzedProfiles(userProfile, 20000, netData.connections);
               setProfiles(analyzed);
               setLiveNetworkMeta({ isLive: netData.source === 'linkedin', totalFound: netData.connections.length, source: netData.source });
               return;
@@ -61,7 +77,7 @@ export default function App() {
         }
       }
 
-      if (userProfile.company && userProfile.company.length > 1) {
+      if (!status.connected && userProfile.company && userProfile.company.length > 1) {
         try {
           const peerRes = await fetch('/api/network/peers', {
             method: 'POST',
@@ -70,7 +86,7 @@ export default function App() {
           });
           const peerData = await peerRes.json();
           if (!isCancelled && Array.isArray(peerData.connections) && peerData.connections.length > 0) {
-            const analyzed = generateAnalyzedProfiles(userProfile, TOTAL_CARDS, peerData.connections);
+            const analyzed = generateAnalyzedProfiles(userProfile, 20000, peerData.connections);
             setProfiles(analyzed);
             setLiveNetworkMeta({ isLive: false, totalFound: peerData.connections.length, source: 'wikidata' });
             return;
@@ -83,7 +99,7 @@ export default function App() {
       if (!isCancelled) {
         setProfiles([]);
         setLiveNetworkMeta({ isLive: false, totalFound: 0 });
-        setNetworkError('No live people found. Connect LinkedIn with a cookie export, or enter a real company Wikidata knows (for public peers).');
+        setNetworkError('No contacts extracted yet. Connect LinkedIn with a Cookie-Editor session, then click Extract contacts.');
       }
     };
 
@@ -133,6 +149,44 @@ export default function App() {
     return profiles.length;
   }, [profiles, activeOverlayId]);
 
+  const globeProfiles = useMemo(() => profiles.slice(0, GLOBE_LIMIT), [profiles]);
+
+  const handleExtractContacts = async () => {
+    setExtracting(true);
+    setExtractStatus('Starting extract…');
+    try {
+      const start = await fetch('/api/linkedin/extract-contacts', { method: 'POST' });
+      const started = await start.json();
+      if (!started.success) throw new Error(started.error || 'Could not start extract');
+      for (let i = 0; i < 600; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const st = await fetch('/api/linkedin/extract-status').then((r) => r.json());
+        setExtractStatus(
+          st.running
+            ? `Extracted ${st.count} so far (${st.first} 1st-degree, ${st.second} 2nd-degree)…`
+            : st.error || `Done · ${st.count} contacts`,
+        );
+        if (!st.running) {
+          if (st.error) throw new Error(st.error);
+          const netRes = await fetch('/api/linkedin/network');
+          const netData = await netRes.json();
+          if (userProfile && Array.isArray(netData.connections)) {
+            setProfiles(generateAnalyzedProfiles(userProfile, 20000, netData.connections));
+            setLiveNetworkMeta({ isLive: true, totalFound: netData.connections.length, source: 'linkedin' });
+            setNetworkError(null);
+          }
+          break;
+        }
+      }
+    } catch (e: any) {
+      setNetworkError(e.message);
+      setConnectNotification(e.message);
+      setTimeout(() => setConnectNotification(null), 6000);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   const handleSendConnectionInvite = async (profileId: string, customNote?: string): Promise<boolean> => {
     try {
       const target = profiles.find(p => p.id === profileId);
@@ -166,6 +220,13 @@ export default function App() {
       return false;
     }
   };
+
+  if (!authChecked) {
+    return <div className="w-full h-full bg-white" />;
+  }
+  if (!accountEmail) {
+    return <AuthScreen onReady={(email) => setAccountEmail(email)} />;
+  }
 
   return (
     <div className="w-full h-full relative bg-slate-950 text-slate-100 overflow-hidden">
@@ -273,9 +334,9 @@ export default function App() {
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
             className={`absolute inset-0 ${selectedProfile ? 'pointer-events-none' : ''}`}
           >
-            {profiles.length > 0 ? (
+            {globeProfiles.length > 0 ? (
               <GalleryGlobe
-                profiles={profiles}
+                profiles={globeProfiles}
                 activeOverlayId={activeOverlayId}
                 overlayColor={activeOverlay.color}
                 onSelectProfile={(p) => setSelectedProfile(p)}
@@ -285,15 +346,28 @@ export default function App() {
                 <div className="max-w-md text-center space-y-3 bg-slate-900/90 border border-slate-700 p-6">
                   <p className="text-sm font-semibold text-white">No live people on the globe yet</p>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    {networkError || 'Connect LinkedIn with a cookie export to load your real 1st-degree network, or enter a company Wikidata knows to plot public colleagues.'}
+                    {networkError || 'Connect LinkedIn with a Cookie-Editor session, then click Extract contacts. A profile URL alone cannot list your connections.'}
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setIsLinkedInModalOpen(true)}
-                    className="px-4 py-2 bg-[#0077b5] text-white text-xs font-bold uppercase tracking-wider"
-                  >
-                    Connect LinkedIn
-                  </button>
+                  <div className="flex gap-2 justify-center">
+                    <button
+                      type="button"
+                      onClick={() => setIsLinkedInModalOpen(true)}
+                      className="px-4 py-2 bg-[#0077b5] text-white text-xs font-bold uppercase tracking-wider"
+                    >
+                      Connect LinkedIn
+                    </button>
+                    {status.canExtract && (
+                      <button
+                        type="button"
+                        onClick={handleExtractContacts}
+                        disabled={extracting}
+                        className="px-4 py-2 bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider"
+                      >
+                        Extract contacts
+                      </button>
+                    )}
+                  </div>
+                  {extractStatus && <p className="text-[11px] text-sky-300">{extractStatus}</p>}
                 </div>
               </div>
             ) : null}
@@ -317,7 +391,10 @@ export default function App() {
             </motion.div>
           )}
 
-          {/* Bottom Center Re-Analyze Button */}
+          {!isLoadingGlobe && !selectedProfile && (
+            <ContactsTable profiles={profiles} onSelect={setSelectedProfile} />
+          )}
+
           {!isLoadingGlobe && !selectedProfile && (
             <motion.div
               initial={{ opacity: 0 }}
@@ -325,6 +402,17 @@ export default function App() {
               transition={{ duration: 1, delay: 0.5 }}
               className="absolute bottom-6 right-6 flex items-center gap-3 z-30"
             >
+              {status.canExtract && (
+                <button
+                  type="button"
+                  onClick={handleExtractContacts}
+                  disabled={extracting}
+                  className="px-4 py-2 text-[10px] text-white bg-emerald-700 hover:bg-emerald-600 border border-emerald-500 tracking-widest uppercase cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>{extracting ? extractStatus || 'Extracting…' : 'Extract contacts'}</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   setUserProfile(null);

@@ -6,13 +6,29 @@ import { GoogleGenAI } from "@google/genai";
 import { CURATED_LOCATIONS } from "./src/data/curatedLocations";
 import {
   analyzeProfileText,
+  connectionsToCsv,
+  csvToConnections,
   discoverJsession,
+  extractFirstDegree,
+  extractSecondDegree,
   fetchVoyagerConnections,
   fetchVoyagerMe,
   parseLinkedInCookies,
   voyagerHeaders,
   wikidataCompanyPeers,
 } from "./src/server/liveNetwork";
+import {
+  clearLinkedIn,
+  contactsPath,
+  cookieFromReq,
+  createSession,
+  destroySession,
+  loginUser,
+  registerUser,
+  saveLinkedIn,
+  userFromToken,
+} from "./src/server/userStore";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 
 const PORT = Number(process.env.PORT) || 3040;
 
@@ -341,21 +357,97 @@ Do not include any other text or introductory phrases.`,
   }
 
   let activeLinkedInSession: LinkedInSession | null = null;
+  const extractJobs = new Map<
+    string,
+    { running: boolean; done: boolean; count: number; first: number; second: number; error?: string; csvPath?: string }
+  >();
+
+  function sidFromReq(req: express.Request) {
+    return cookieFromReq(req.headers.cookie, "lb_sid");
+  }
+
+  function currentUser(req: express.Request) {
+    return userFromToken(sidFromReq(req));
+  }
+
+  function sessionFor(req: express.Request): LinkedInSession | null {
+    const user = currentUser(req);
+    if (user?.linkedin && typeof user.linkedin === "object") {
+      return user.linkedin as unknown as LinkedInSession;
+    }
+    return activeLinkedInSession;
+  }
+
+  function persistSession(req: express.Request, session: LinkedInSession | null) {
+    const user = currentUser(req);
+    if (user) {
+      if (session) saveLinkedIn(user.id, session as unknown as Record<string, unknown>);
+      else clearLinkedIn(user.id);
+    }
+    activeLinkedInSession = session;
+  }
+
+  app.post("/api/auth/register", (req, res) => {
+    try {
+      const user = registerUser(String(req.body?.email || ""), String(req.body?.password || ""));
+      const token = createSession(user.id);
+      res.setHeader("Set-Cookie", `lb_sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+      res.json({ success: true, user: { id: user.id, email: user.email } });
+    } catch (e: any) {
+      res.status(400).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/auth/login", (req, res) => {
+    try {
+      const user = loginUser(String(req.body?.email || ""), String(req.body?.password || ""));
+      const token = createSession(user.id);
+      res.setHeader("Set-Cookie", `lb_sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+      res.json({ success: true, user: { id: user.id, email: user.email, hasLinkedIn: Boolean(user.linkedin) } });
+    } catch (e: any) {
+      res.status(400).json({ success: false, error: e.message });
+    }
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    destroySession(sidFromReq(req));
+    res.setHeader("Set-Cookie", "lb_sid=; Path=/; HttpOnly; Max-Age=0");
+    res.json({ success: true });
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.json({ success: false, user: null });
+    const csv = contactsPath(user.id);
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        hasLinkedIn: Boolean(user.linkedin),
+        contactsFile: existsSync(csv),
+      },
+    });
+  });
 
   // Check LinkedIn status via Agent Reach
   app.get('/api/linkedin/status', (req, res) => {
+    const session = sessionFor(req);
+    const user = currentUser(req);
     res.json({
-      connected: Boolean(activeLinkedInSession),
-      profile: activeLinkedInSession ? {
-        id: activeLinkedInSession.id,
-        name: activeLinkedInSession.name,
-        headline: activeLinkedInSession.headline,
-        username: activeLinkedInSession.username,
-        avatar_url: activeLinkedInSession.avatar_url,
-        profile_url: activeLinkedInSession.profile_url,
-        location: activeLinkedInSession.location,
-        connectedAt: activeLinkedInSession.connectedAt,
-        authType: activeLinkedInSession.authType
+      connected: Boolean(session),
+      canExtract: Boolean(session?.sessionCookie),
+      contactsReady: user ? existsSync(contactsPath(user.id)) : false,
+      profile: session ? {
+        id: session.id,
+        name: session.name,
+        headline: session.headline,
+        username: session.username,
+        avatar_url: session.avatar_url,
+        profile_url: session.profile_url,
+        location: session.location,
+        connectedAt: session.connectedAt,
+        authType: session.authType
       } : null,
       agentReachActive: true
     });
@@ -390,7 +482,7 @@ Do not include any other text or introductory phrases.`,
         const displayName = name?.trim() || me.name;
         const sessionHeadline = headline?.trim() || me.headline || 'LinkedIn member';
 
-        activeLinkedInSession = {
+        const cookieSession: LinkedInSession = {
           id: `li_${Date.now()}`,
           name: displayName,
           headline: sessionHeadline,
@@ -402,11 +494,13 @@ Do not include any other text or introductory phrases.`,
           authType: 'agent-reach-cookie',
           sessionCookie: JSON.stringify(jar)
         };
+        persistSession(req, cookieSession);
 
         return res.json({
           success: true,
-          profile: activeLinkedInSession,
-          message: 'Connected to your live LinkedIn session'
+          profile: cookieSession,
+          canExtract: true,
+          message: 'Connected to your live LinkedIn session. Click Extract contacts to pull your network into CSV.'
         });
       }
 
@@ -470,7 +564,7 @@ Do not include any other text or introductory phrases.`,
           parsedCompany = atMatch ? atMatch[1].trim() : 'Technology Ecosystem';
         }
 
-        activeLinkedInSession = {
+        const urlSession: LinkedInSession = {
           id: `li_${Date.now()}`,
           name: finalName,
           headline: finalHeadline,
@@ -482,11 +576,13 @@ Do not include any other text or introductory phrases.`,
           connectedAt: new Date().toISOString(),
           authType: 'profile-url'
         };
+        persistSession(req, urlSession);
 
         return res.json({
           success: true,
-          profile: activeLinkedInSession,
-          message: 'Connected successfully to real LinkedIn profile'
+          profile: urlSession,
+          canExtract: false,
+          message: 'Profile linked. To extract contacts, also connect with a Cookie-Editor session — LinkedIn will not list connections from a public URL alone.'
         });
       }
 
@@ -503,14 +599,129 @@ Do not include any other text or introductory phrases.`,
 
   // Disconnect active LinkedIn session
   app.post('/api/linkedin/disconnect', (req, res) => {
-    activeLinkedInSession = null;
+    persistSession(req, null);
     res.json({ success: true });
+  });
+
+  app.post('/api/linkedin/extract-contacts', async (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ success: false, error: 'Create an account first so contacts are saved to you, not a shared session.' });
+    const session = sessionFor(req);
+    if (!session?.sessionCookie) {
+      return res.status(400).json({
+        success: false,
+        error: 'Extracting contacts requires your LinkedIn browser session (Cookie-Editor JSON with li_at). A profile URL cannot list other people’s connections.'
+      });
+    }
+    let jar: { liAt?: string; jsession?: string } = {};
+    try { jar = JSON.parse(session.sessionCookie); } catch { /* ignore */ }
+    if (!jar.liAt) return res.status(400).json({ success: false, error: 'Saved LinkedIn session is not a live login cookie.' });
+
+    const jobId = user.id;
+    if (extractJobs.get(jobId)?.running) {
+      return res.json({ success: true, jobId, message: 'Extract already running' });
+    }
+    extractJobs.set(jobId, { running: true, done: false, count: 0, first: 0, second: 0 });
+    res.json({ success: true, jobId, message: 'Extracting 1st-degree contacts, then paging 2nd-degree search.' });
+
+    const cookieJar = { liAt: jar.liAt, jsession: jar.jsession || '' };
+    void (async () => {
+      try {
+        const first = await extractFirstDegree(cookieJar, session.name, {
+          max: 8000,
+          onProgress: (n) => {
+            const job = extractJobs.get(jobId);
+            if (job) extractJobs.set(jobId, { ...job, count: n, first: n });
+          },
+        });
+        const second = await extractSecondDegree(cookieJar, session.name, {
+          max: 2500,
+          onProgress: (n) => {
+            const job = extractJobs.get(jobId);
+            if (job) extractJobs.set(jobId, { ...job, second: n, count: first.length + n });
+          },
+        });
+        const people = [...first];
+        const seen = new Set(first.map((p) => p.profileUrl.toLowerCase()));
+        for (const p of second) {
+          if (seen.has(p.profileUrl.toLowerCase())) continue;
+          seen.add(p.profileUrl.toLowerCase());
+          people.push(p);
+        }
+        const csvPath = contactsPath(user.id);
+        writeFileSync(csvPath, connectionsToCsv(people));
+        extractJobs.set(jobId, {
+          running: false,
+          done: true,
+          count: people.length,
+          first: first.length,
+          second: people.length - first.length,
+          csvPath,
+        });
+      } catch (err: any) {
+        extractJobs.set(jobId, {
+          running: false,
+          done: true,
+          count: extractJobs.get(jobId)?.count || 0,
+          first: extractJobs.get(jobId)?.first || 0,
+          second: extractJobs.get(jobId)?.second || 0,
+          error: err.message || 'Extract failed',
+        });
+      }
+    })();
+  });
+
+  app.get('/api/linkedin/extract-status', (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ success: false, error: 'Not signed in' });
+    const job = extractJobs.get(user.id);
+    const csv = contactsPath(user.id);
+    res.json({
+      success: true,
+      running: Boolean(job?.running),
+      done: Boolean(job?.done || existsSync(csv)),
+      count: job?.count || 0,
+      first: job?.first || 0,
+      second: job?.second || 0,
+      error: job?.error,
+      hasCsv: existsSync(csv),
+    });
+  });
+
+  app.get('/api/linkedin/contacts.csv', (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).send('Sign in first');
+    const csv = contactsPath(user.id);
+    if (!existsSync(csv)) return res.status(404).send('No extracted contacts yet. Click Extract contacts.');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="linkedin-contacts.csv"');
+    res.send(readFileSync(csv, 'utf8'));
   });
 
   // Fetch live LinkedIn connections (cookie) or Wikidata company peers (public)
   app.get('/api/linkedin/network', async (req, res) => {
     try {
-      if (!activeLinkedInSession) {
+      const linkedinSession = sessionFor(req);
+      const user = currentUser(req);
+      if (user && existsSync(contactsPath(user.id))) {
+        const connections = csvToConnections(readFileSync(contactsPath(user.id), 'utf8'));
+        return res.json({
+          success: connections.length > 0,
+          authenticated: true,
+          isLiveScraped: true,
+          source: 'linkedin',
+          totalFound: connections.length,
+          user: {
+            name: linkedinSession?.name || user.email,
+            headline: linkedinSession?.headline || '',
+            company: (linkedinSession as any)?.company || '',
+            location: linkedinSession?.location || '',
+            profileUrl: linkedinSession?.profile_url || ''
+          },
+          connections
+        });
+      }
+      if (!linkedinSession) {
         return res.json({
           success: false,
           authenticated: false,
@@ -522,11 +733,11 @@ Do not include any other text or introductory phrases.`,
       let connections: Awaited<ReturnType<typeof fetchVoyagerConnections>> = [];
       let source: 'linkedin' | 'wikidata' | 'none' = 'none';
 
-      if (activeLinkedInSession.sessionCookie) {
+      if (linkedinSession.sessionCookie) {
         try {
-          const jar = JSON.parse(activeLinkedInSession.sessionCookie);
+          const jar = JSON.parse(linkedinSession.sessionCookie);
           if (jar?.liAt) {
-            connections = await fetchVoyagerConnections(jar, activeLinkedInSession.name);
+            connections = await fetchVoyagerConnections(jar, linkedinSession.name);
             if (connections.length) source = 'linkedin';
           }
         } catch (err) {
@@ -535,8 +746,8 @@ Do not include any other text or introductory phrases.`,
       }
 
       if (!connections.length) {
-        const company = (activeLinkedInSession as any).company || '';
-        const industry = (activeLinkedInSession as any).industry || activeLinkedInSession.headline || '';
+        const company = (linkedinSession as any).company || '';
+        const industry = (linkedinSession as any).industry || linkedinSession.headline || '';
         if (company) {
           connections = await wikidataCompanyPeers(company, industry);
           if (connections.length) source = 'wikidata';
@@ -550,11 +761,11 @@ Do not include any other text or introductory phrases.`,
         source,
         totalFound: connections.length,
         user: {
-          name: activeLinkedInSession.name,
-          headline: activeLinkedInSession.headline,
-          company: (activeLinkedInSession as any).company || '',
-          location: activeLinkedInSession.location || '',
-          profileUrl: activeLinkedInSession.profile_url || ''
+          name: linkedinSession.name,
+          headline: linkedinSession.headline,
+          company: (linkedinSession as any).company || '',
+          location: linkedinSession.location || '',
+          profileUrl: linkedinSession.profile_url || ''
         },
         connections
       });
@@ -601,7 +812,8 @@ Do not include any other text or introductory phrases.`,
     try {
       const { profileId, profileUrl, note } = req.body || {};
       
-      if (!activeLinkedInSession?.sessionCookie) {
+      const inviteSession = sessionFor(req);
+      if (!inviteSession?.sessionCookie) {
         return res.json({
           success: false,
           profileId,
@@ -611,7 +823,7 @@ Do not include any other text or introductory phrases.`,
       }
 
       let jar: { liAt?: string; jsession?: string } = {};
-      try { jar = JSON.parse(activeLinkedInSession.sessionCookie); } catch { /* ignore */ }
+      try { jar = JSON.parse(inviteSession.sessionCookie); } catch { /* ignore */ }
       if (!jar.liAt) {
         return res.json({ success: false, error: 'Session cookie is not a live LinkedIn login.', profileUrl });
       }

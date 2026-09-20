@@ -4,11 +4,13 @@
 
 ## What is live
 
-- **LinkedIn cookie session** — Cookie-Editor JSON with `li_at` (and `JSESSIONID` if present). Loads your real `/voyager/api/me` profile and 1st-degree connections.
-- **Public company peers** — If there is no cookie, Wikidata employees of the company you typed (with Wikipedia portraits and LinkedIn slugs when Wikidata has them). Labeled as public peers, not as your connections.
-- **Resume / profile text** — Parsed from the file. Optional `XAI_API_KEY` uses Grok to extract fields; otherwise a local parser.
+- **Accounts** — each user registers and keeps their own LinkedIn session + contacts CSV.
+- **Extract contacts** — after a Cookie-Editor session (`li_at` + `JSESSIONID`), one button pages LinkedIn for 1st-degree connections (up to thousands) and then 2nd-degree search pages. Saved as `data/contacts/<user>.csv`. Users never download an archive from LinkedIn.
+- **Match scores** — per person from shared company and title tokens, not a flat 50%.
+- **Globe** shows the top 80 by score; the table lists the full extract (searchable, CSV download).
+- A **profile URL alone cannot list connections**. LinkedIn will not give someone else's graph from a public link. Extract requires the owner's browser session.
 
-The globe only plots people that came back from those sources. If LinkedIn rejects the cookie, the app says so instead of inventing a network.
+If LinkedIn rate-limits paging, the extract stops at whatever it collected and still writes the CSV.
 
 ## Run
 

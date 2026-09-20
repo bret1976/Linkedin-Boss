@@ -12,6 +12,8 @@ export interface LinkedInProfile {
 
 export interface LinkedInStatus {
   connected: boolean;
+  canExtract?: boolean;
+  contactsReady?: boolean;
   profile: LinkedInProfile | null;
   agentReachActive: boolean;
   error?: string;

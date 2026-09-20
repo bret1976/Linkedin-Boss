@@ -205,7 +205,7 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
                       Live LinkedIn Profile & Network Integration
                     </h4>
                     <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
-                      Connect your account to extract your real profile credentials, headline, and connections graph directly onto the 3D globe.
+                      Connect with a Cookie-Editor session, then click Extract contacts. We pull your 1st-degree list into a CSV and score every person — you do not download an archive from LinkedIn yourself. A public profile URL cannot list connections.
                     </p>
                   </div>
                 </div>

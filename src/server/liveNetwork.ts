@@ -189,59 +189,211 @@ export async function fetchVoyagerMe(jar: CookieJar) {
   };
 }
 
-export async function fetchVoyagerConnections(jar: CookieJar, userName: string): Promise<LivePerson[]> {
-  const endpoints = [
-    "https://www.linkedin.com/voyager/api/relationships/dash/connections?decorationId=com.linkedin.voyager.dash.deco.relationships.Connection-26&count=50&q=search",
-    "https://www.linkedin.com/voyager/api/relationships/connections?count=50&sortType=RECENTLY_ADDED",
-  ];
-  const out: LivePerson[] = [];
-  const seen = new Set<string>();
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
-  for (const ep of endpoints) {
-    try {
-      const res = await fetch(ep, { headers: voyagerHeaders(jar) });
-      if (!res.ok) continue;
-      const data = (await res.json()) as Record<string, unknown>;
-      const rows = (Array.isArray(data.included) ? data.included : Array.isArray(data.elements) ? data.elements : []) as Record<
-        string,
-        unknown
-      >[];
-      for (const item of rows) {
-        const mini = ((item.miniProfile as Record<string, unknown>) || item) as Record<string, unknown>;
-        const first = String(mini.firstName || "");
-        const last = String(mini.lastName || "");
-        const fullName = `${first} ${last}`.trim();
-        const publicId = String(mini.publicIdentifier || "");
-        if (fullName.length < 2 || seen.has(fullName.toLowerCase())) continue;
-        seen.add(fullName.toLowerCase());
-        const occupation = String(mini.occupation || mini.headline || "");
-        let avatar = "";
-        const pic = (mini.picture || item.picture) as { rootUrl?: string; artifacts?: { fileIdentifyingUrlPathSegment?: string }[] } | undefined;
-        if (pic?.rootUrl && pic.artifacts?.length) {
-          const lastArt = pic.artifacts[pic.artifacts.length - 1];
-          avatar = `${pic.rootUrl}${lastArt.fileIdentifyingUrlPathSegment || ""}`;
+function personFromMini(
+  item: Record<string, unknown>,
+  userName: string,
+  degree: LivePerson["connectionDegree"],
+): LivePerson | null {
+  const mini = ((item.miniProfile as Record<string, unknown>) || item) as Record<string, unknown>;
+  const first = String(mini.firstName || item.firstName || "");
+  const last = String(mini.lastName || item.lastName || "");
+  const fullName = `${first} ${last}`.trim() || String(mini.publicIdentifier || "");
+  const publicId = String(mini.publicIdentifier || item.publicId || "");
+  if (fullName.length < 2) return null;
+  const occupation = String(mini.occupation || mini.headline || item.headline || "");
+  let avatar = "";
+  const pic = (mini.picture || item.picture) as
+    | { rootUrl?: string; artifacts?: { fileIdentifyingUrlPathSegment?: string }[] }
+    | undefined;
+  if (pic?.rootUrl && pic.artifacts?.length) {
+    const lastArt = pic.artifacts[pic.artifacts.length - 1];
+    avatar = `${pic.rootUrl}${lastArt.fileIdentifyingUrlPathSegment || ""}`;
+  }
+  return {
+    id: `li-${publicId || fullName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    name: fullName,
+    headline: occupation || "LinkedIn connection",
+    company: companyFromHeadline(occupation) || "",
+    industry: industryFromHeadline(occupation),
+    location: String(item.location || ""),
+    avatarUrl: avatar,
+    connectionDegree: degree,
+    mutualConnectionsCount: Number(item.mutualConnectionsCount || 0) || 0,
+    sharedMutualConnections: userName ? [userName] : [],
+    skills: skillsFromText(occupation),
+    graphLayer: layerFromHeadline(occupation),
+    profileUrl: publicId ? `https://www.linkedin.com/in/${publicId}` : "https://www.linkedin.com",
+    source: "linkedin",
+  };
+}
+
+function collectMinis(data: Record<string, unknown>): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  const push = (item: unknown) => {
+    if (item && typeof item === "object") rows.push(item as Record<string, unknown>);
+  };
+  if (Array.isArray(data.included)) data.included.forEach(push);
+  if (Array.isArray(data.elements)) data.elements.forEach(push);
+  const nested = data.data as Record<string, unknown> | undefined;
+  if (nested && Array.isArray(nested.elements)) nested.elements.forEach(push);
+  return rows;
+}
+
+export async function extractFirstDegree(
+  jar: CookieJar,
+  userName: string,
+  opts: { max?: number; onProgress?: (count: number) => void } = {},
+): Promise<LivePerson[]> {
+  const max = opts.max ?? 8000;
+  const pageSize = 50;
+  const seen = new Set<string>();
+  const out: LivePerson[] = [];
+  const bases = [
+    (start: number) =>
+      `https://www.linkedin.com/voyager/api/relationships/dash/connections?decorationId=com.linkedin.voyager.dash.deco.relationships.Connection-26&count=${pageSize}&start=${start}&q=search`,
+    (start: number) =>
+      `https://www.linkedin.com/voyager/api/relationships/connections?count=${pageSize}&start=${start}&sortType=RECENTLY_ADDED`,
+  ];
+
+  for (const makeUrl of bases) {
+    let emptyPages = 0;
+    for (let start = 0; start < max; start += pageSize) {
+      let batch: LivePerson[] = [];
+      try {
+        const res = await fetch(makeUrl(start), { headers: voyagerHeaders(jar) });
+        if (!res.ok) {
+          emptyPages++;
+          if (emptyPages >= 2) break;
+          continue;
         }
-        out.push({
-          id: `li-${publicId || out.length}`,
-          name: fullName,
-          headline: occupation || "LinkedIn connection",
-          company: companyFromHeadline(occupation) || "",
-          industry: industryFromHeadline(occupation),
-          location: "",
-          avatarUrl: avatar,
-          connectionDegree: "1st",
-          mutualConnectionsCount: 0,
-          sharedMutualConnections: userName ? [userName] : [],
-          skills: skillsFromText(occupation),
-          graphLayer: layerFromHeadline(occupation),
-          profileUrl: publicId ? `https://www.linkedin.com/in/${publicId}` : "https://www.linkedin.com",
-          source: "linkedin",
-        });
+        const data = (await res.json()) as Record<string, unknown>;
+        for (const item of collectMinis(data)) {
+          const person = personFromMini(item, userName, "1st");
+          if (!person) continue;
+          const key = person.profileUrl.toLowerCase();
+          if (seen.has(key) || seen.has(person.name.toLowerCase())) continue;
+          seen.add(key);
+          seen.add(person.name.toLowerCase());
+          batch.push(person);
+          out.push(person);
+        }
+      } catch {
+        emptyPages++;
       }
-      if (out.length) break;
-    } catch {
-      /* try next */
+      opts.onProgress?.(out.length);
+      if (!batch.length) {
+        emptyPages++;
+        if (emptyPages >= 2) break;
+      } else {
+        emptyPages = 0;
+      }
+      await sleep(400);
     }
+    if (out.length) break;
+  }
+  return out;
+}
+
+export async function extractSecondDegree(
+  jar: CookieJar,
+  userName: string,
+  opts: { max?: number; onProgress?: (count: number) => void } = {},
+): Promise<LivePerson[]> {
+  const max = opts.max ?? 2000;
+  const pageSize = 50;
+  const seen = new Set<string>();
+  const out: LivePerson[] = [];
+  const urls = (start: number) => [
+    `https://www.linkedin.com/voyager/api/search/hits?q=all&origin=SWITCH_SEARCH_VERTICAL&count=${pageSize}&start=${start}&facetNetwork=${encodeURIComponent('["S"]')}`,
+    `https://www.linkedin.com/voyager/api/search/blended?filters=List(network-%3ES)&keywords=&count=${pageSize}&start=${start}`,
+  ];
+
+  for (let start = 0; start < max; start += pageSize) {
+    let added = 0;
+    for (const url of urls(start)) {
+      try {
+        const res = await fetch(url, { headers: voyagerHeaders(jar) });
+        if (!res.ok) continue;
+        const data = (await res.json()) as Record<string, unknown>;
+        for (const item of collectMinis(data)) {
+          const person = personFromMini(item, userName, "2nd");
+          if (!person) continue;
+          const key = person.profileUrl.toLowerCase();
+          if (seen.has(key) || seen.has(person.name.toLowerCase())) continue;
+          seen.add(key);
+          seen.add(person.name.toLowerCase());
+          out.push(person);
+          added++;
+        }
+        if (added) break;
+      } catch {
+        /* next url */
+      }
+    }
+    opts.onProgress?.(out.length);
+    if (!added) break;
+    await sleep(500);
+  }
+  return out;
+}
+
+export async function fetchVoyagerConnections(jar: CookieJar, userName: string): Promise<LivePerson[]> {
+  return extractFirstDegree(jar, userName, { max: 8000 });
+}
+
+export function connectionsToCsv(people: LivePerson[]): string {
+  const esc = (v: string) => `"${String(v || "").replace(/"/g, '""')}"`;
+  const header = "First Name,Last Name,URL,Company,Position,Degree,Industry,Location";
+  const lines = people.map((p) => {
+    const parts = p.name.split(/\s+/);
+    const first = parts[0] || "";
+    const last = parts.slice(1).join(" ");
+    return [first, last, p.profileUrl, p.company, p.headline, p.connectionDegree, p.industry, p.location]
+      .map(esc)
+      .join(",");
+  });
+  return [header, ...lines].join("\n");
+}
+
+export function csvToConnections(csv: string): LivePerson[] {
+  const lines = csv.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const header = lines[0].toLowerCase();
+  const out: LivePerson[] = [];
+  for (const line of lines.slice(1)) {
+    const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((c) => c.replace(/^"|"$/g, "").replace(/""/g, '"'));
+    const get = (name: string, idx: number) => {
+      const i = header.split(",").findIndex((h) => h.replace(/"/g, "").trim() === name);
+      return (i >= 0 ? cols[i] : cols[idx]) || "";
+    };
+    const first = get("first name", 0);
+    const last = get("last name", 1);
+    const url = get("url", 2);
+    const company = get("company", 3);
+    const position = get("position", 4);
+    const degree = (get("degree", 5) || "1st") as LivePerson["connectionDegree"];
+    const name = `${first} ${last}`.trim();
+    if (!name) continue;
+    out.push({
+      id: `csv-${url || name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+      name,
+      headline: position,
+      company,
+      industry: industryFromHeadline(`${position} ${company}`),
+      location: get("location", 7),
+      avatarUrl: "",
+      connectionDegree: degree === "2nd" || degree === "3rd+" ? degree : "1st",
+      mutualConnectionsCount: 0,
+      sharedMutualConnections: [],
+      skills: skillsFromText(position, company),
+      graphLayer: layerFromHeadline(`${position} ${company}`),
+      profileUrl: url || "https://www.linkedin.com",
+      source: "linkedin",
+    });
   }
   return out;
 }
