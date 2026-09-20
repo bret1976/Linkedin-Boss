@@ -1,0 +1,10 @@
+{
+  "name": "Remix Anywhere",
+  "description": "An interactive 3D spherical visual knowledge graph from LinkedIn data with multi-graph overlays, connection traversal, automated business match scorecards, and instant LinkedIn connection workflows.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
