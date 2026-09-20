@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import GalleryGlobe from './components/GalleryGlobe';
 import IntroScreen from './components/IntroScreen';
@@ -15,7 +15,7 @@ import { DEFAULT_OVERLAYS } from './data/networkGraphData';
 import { generateAnalyzedProfiles } from './utils/graphAnalysis';
 import { Download, Loader2, RefreshCw, CheckCircle2, Globe2 } from 'lucide-react';
 
-const GLOBE_LIMIT = 80;
+const GLOBE_LIMIT = 250;
 
 export default function App() {
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
@@ -77,29 +77,14 @@ export default function App() {
         }
       }
 
-      if (!status.connected && userProfile.company && userProfile.company.length > 1) {
-        try {
-          const peerRes = await fetch('/api/network/peers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ company: userProfile.company, industry: userProfile.industry, headline: userProfile.headline })
-          });
-          const peerData = await peerRes.json();
-          if (!isCancelled && Array.isArray(peerData.connections) && peerData.connections.length > 0) {
-            const analyzed = generateAnalyzedProfiles(userProfile, 20000, peerData.connections);
-            setProfiles(analyzed);
-            setLiveNetworkMeta({ isLive: false, totalFound: peerData.connections.length, source: 'wikidata' });
-            return;
-          }
-        } catch (e) {
-          console.warn('Peer lookup notice:', e);
-        }
-      }
-
       if (!isCancelled) {
         setProfiles([]);
         setLiveNetworkMeta({ isLive: false, totalFound: 0 });
-        setNetworkError('No contacts extracted yet. Connect LinkedIn with a Cookie-Editor session, then click Extract contacts.');
+        setNetworkError(
+          status.canExtract
+            ? 'Session is connected. Click Extract contacts to pull your LinkedIn 1st-degree list (and page 2nd-degree). That is how you get thousands of people — not a profile URL.'
+            : 'Connect LinkedIn with a Cookie-Editor session (li_at + JSESSIONID), then Extract contacts. A profile URL cannot list your 2,500 connections.',
+        );
       }
     };
 
@@ -184,8 +169,17 @@ export default function App() {
       setTimeout(() => setConnectNotification(null), 6000);
     } finally {
       setExtracting(false);
+      refreshLinkedInStatus();
     }
   };
+
+  const autoExtracted = useRef(false);
+  useEffect(() => {
+    if (autoExtracted.current) return;
+    if (!accountEmail || !status.canExtract || status.contactsReady || extracting) return;
+    autoExtracted.current = true;
+    void handleExtractContacts();
+  }, [accountEmail, status.canExtract, status.contactsReady, extracting]);
 
   const handleSendConnectionInvite = async (profileId: string, customNote?: string): Promise<boolean> => {
     try {
@@ -266,7 +260,11 @@ export default function App() {
             {status.connected && (
               <div className="text-[10px] text-sky-300 mt-1 border-t border-slate-800 pt-1 flex items-center gap-1">
                 <Globe2 className="w-3 h-3 text-sky-400" />
-                <span>Synchronized with LinkedIn profile network</span>
+                <span>
+                  {profiles.length
+                    ? `${profiles.length} extracted contacts · globe shows top ${Math.min(GLOBE_LIMIT, profiles.length)} by match`
+                    : 'Click Extract contacts to load your full 1st-degree list'}
+                </span>
               </div>
             )}
           </div>

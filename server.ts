@@ -692,7 +692,12 @@ Do not include any other text or introductory phrases.`,
     const user = currentUser(req);
     if (!user) return res.status(401).send('Sign in first');
     const csv = contactsPath(user.id);
-    if (!existsSync(csv)) return res.status(404).send('No extracted contacts yet. Click Extract contacts.');
+    if (!existsSync(csv)) {
+      return res.status(404).json({
+        success: false,
+        error: 'No extracted contacts yet. Stay in the app and click Extract contacts — then Download CSV from the contacts list.',
+      });
+    }
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="linkedin-contacts.csv"');
     res.send(readFileSync(csv, 'utf8'));

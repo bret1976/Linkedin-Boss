@@ -1,6 +1,26 @@
 import { useMemo, useState } from 'react';
 import { LinkedInMatchProfile } from '../types/knowledgeGraph';
 
+function downloadCsv(profiles: LinkedInMatchProfile[]) {
+  const esc = (v: string) => `"${String(v || "").replace(/"/g, '""')}"`;
+  const header = "First Name,Last Name,URL,Company,Position,Degree,Industry,Match %";
+  const lines = profiles.map((p) => {
+    const parts = p.name.split(/\s+/);
+    return [parts[0] || "", parts.slice(1).join(" "), p.profileUrl, p.company, p.headline, p.connectionDegree, p.industry, String(p.matchScore)]
+      .map(esc)
+      .join(",");
+  });
+  const blob = new Blob([[header, ...lines].join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "linkedin-contacts.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function ContactsTable({
   profiles,
   onSelect,
@@ -9,18 +29,17 @@ export default function ContactsTable({
   onSelect: (p: LinkedInMatchProfile) => void;
 }) {
   const [q, setQ] = useState('');
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list = needle
-      ? profiles.filter(
-          (p) =>
-            p.name.toLowerCase().includes(needle) ||
-            p.headline.toLowerCase().includes(needle) ||
-            p.company.toLowerCase().includes(needle),
-        )
-      : profiles;
-    return list.slice(0, 500);
+    if (!needle) return profiles;
+    return profiles.filter(
+      (p) =>
+        p.name.toLowerCase().includes(needle) ||
+        p.headline.toLowerCase().includes(needle) ||
+        p.company.toLowerCase().includes(needle),
+    );
   }, [profiles, q]);
+  const rows = filtered.slice(0, 2500);
 
   if (!profiles.length) return null;
 
@@ -28,11 +47,16 @@ export default function ContactsTable({
     <div className="absolute right-6 top-24 z-30 w-[min(28rem,calc(100vw-3rem))] max-h-[min(52vh,28rem)] overflow-hidden bg-slate-900/95 border border-slate-700 shadow-xl">
       <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-between gap-2">
         <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400">
-          Extracted contacts · {profiles.length}
+          Contacts · {profiles.length}
+          {filtered.length !== profiles.length ? ` · ${filtered.length} shown` : ""}
         </div>
-        <a href="/api/linkedin/contacts.csv" className="text-[10px] text-sky-300 underline">
+        <button
+          type="button"
+          onClick={() => downloadCsv(profiles)}
+          className="text-[10px] text-sky-300 underline"
+        >
           Download CSV
-        </a>
+        </button>
       </div>
       <input
         value={q}
