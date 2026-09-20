@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { generateFibonacciSphere } from '../utils/math';
-import { GLOBE_RADIUS, TOTAL_CARDS } from '../data';
+import { GLOBE_RADIUS } from '../data';
 import Card from './Card';
 import NetworkEdges from './NetworkEdges';
 import { LinkedInMatchProfile } from '../types/knowledgeGraph';
@@ -36,13 +36,14 @@ export default function Globe({
 
   // Precalculate spherical positions
   const { positions, cardData } = useMemo(() => {
-    const rawPositions = generateFibonacciSphere(TOTAL_CARDS, GLOBE_RADIUS);
-    const data = rawPositions.map((pos) => ({
+    const count = Math.max(profiles.length, 1);
+    const rawPositions = generateFibonacciSphere(count, GLOBE_RADIUS);
+    const data = rawPositions.map((pos, i) => ({
       position: pos,
-      scale: 0.72 + Math.random() * 0.4
+      scale: 0.78 + ((i % 5) * 0.04)
     }));
     return { positions: rawPositions, cardData: data };
-  }, []);
+  }, [profiles.length]);
 
   useFrame(() => {
     if (!groupRef.current) return;
@@ -82,7 +83,8 @@ export default function Globe({
 
       {/* Spherical Card Grid */}
       {cardData.map((data, i) => {
-        const profile = profiles[i % profiles.length];
+        const profile = profiles[i];
+        if (!profile) return null;
 
         // Check if card matches active overlay filter
         let isDimmed = false;

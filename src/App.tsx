@@ -22,7 +22,8 @@ export default function App() {
   const [activeOverlayId, setActiveOverlayId] = useState<string>('all');
   const [profiles, setProfiles] = useState<LinkedInMatchProfile[]>([]);
   const [connectNotification, setConnectNotification] = useState<string | null>(null);
-  const [liveNetworkMeta, setLiveNetworkMeta] = useState<{ isLive: boolean; totalFound: number } | null>(null);
+  const [liveNetworkMeta, setLiveNetworkMeta] = useState<{ isLive: boolean; totalFound: number; source?: string } | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
 
   const {
     status,
@@ -41,16 +42,17 @@ export default function App() {
     const buildNetwork = async () => {
       if (!userProfile) return;
 
-      // If LinkedIn session is active, request live network graph connections
+      setNetworkError(null);
+
       if (status.connected) {
         try {
           const netRes = await fetch('/api/linkedin/network');
           if (netRes.ok) {
             const netData = await netRes.json();
-            if (!isCancelled && netData.success && Array.isArray(netData.connections) && netData.connections.length > 0) {
+            if (!isCancelled && Array.isArray(netData.connections) && netData.connections.length > 0) {
               const analyzed = generateAnalyzedProfiles(userProfile, TOTAL_CARDS, netData.connections);
               setProfiles(analyzed);
-              setLiveNetworkMeta({ isLive: true, totalFound: netData.connections.length });
+              setLiveNetworkMeta({ isLive: netData.source === 'linkedin', totalFound: netData.connections.length, source: netData.source });
               return;
             }
           }
@@ -59,11 +61,29 @@ export default function App() {
         }
       }
 
-      // If no custom live connections or offline/mock session, synthesize personalized network
+      if (userProfile.company && userProfile.company.length > 1) {
+        try {
+          const peerRes = await fetch('/api/network/peers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ company: userProfile.company, industry: userProfile.industry, headline: userProfile.headline })
+          });
+          const peerData = await peerRes.json();
+          if (!isCancelled && Array.isArray(peerData.connections) && peerData.connections.length > 0) {
+            const analyzed = generateAnalyzedProfiles(userProfile, TOTAL_CARDS, peerData.connections);
+            setProfiles(analyzed);
+            setLiveNetworkMeta({ isLive: false, totalFound: peerData.connections.length, source: 'wikidata' });
+            return;
+          }
+        } catch (e) {
+          console.warn('Peer lookup notice:', e);
+        }
+      }
+
       if (!isCancelled) {
-        const analyzed = generateAnalyzedProfiles(userProfile, TOTAL_CARDS);
-        setProfiles(analyzed);
-        setLiveNetworkMeta(status.connected ? { isLive: true, totalFound: TOTAL_CARDS } : null);
+        setProfiles([]);
+        setLiveNetworkMeta({ isLive: false, totalFound: 0 });
+        setNetworkError('No live people found. Connect LinkedIn with a cookie export, or enter a real company Wikidata knows (for public peers).');
       }
     };
 
@@ -77,16 +97,16 @@ export default function App() {
   // Synchronize with active LinkedIn session if connected via Agent Reach
   useEffect(() => {
     if (status.connected && status.profile) {
+      const headline = status.profile.headline || '';
+      const at = headline.match(/(?:at|@)\s+([^|,•]+)/i);
       const activeUser: UserUploadedProfile = {
         name: status.profile.name,
-        headline: status.profile.headline || 'LinkedIn Professional',
-        company: 'Connected Network',
-        industry: status.profile.headline?.toLowerCase().includes('venture') ? 'Venture Capital & Private Equity'
-          : status.profile.headline?.toLowerCase().includes('ai') ? 'Artificial Intelligence & Software'
-          : 'Technology & Management',
-        location: status.profile.location || 'United States',
-        skills: ['Generative AI', 'Venture Capital', 'Product Strategy', 'B2B Enterprise', 'Strategic Alliances'],
-        avatarUrl: status.profile.avatar_url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80'
+        headline: headline || 'LinkedIn member',
+        company: at?.[1]?.trim() || '',
+        industry: /venture|capital/i.test(headline) ? 'Venture Capital' : /ai|software|engineer/i.test(headline) ? 'Technology' : '',
+        location: status.profile.location || '',
+        skills: headline.split(/[|,•]/).map(s => s.trim()).filter(s => s.length > 2 && s.length < 40).slice(0, 6),
+        avatarUrl: status.profile.avatar_url || ''
       };
       setUserProfile(activeUser);
       setIsLoadingGlobe(true);
@@ -135,6 +155,11 @@ export default function App() {
         setTimeout(() => setConnectNotification(null), 4000);
         return true;
       }
+      if (data.profileUrl) {
+        window.open(data.profileUrl, '_blank', 'noopener,noreferrer');
+      }
+      setConnectNotification(data.error || 'Could not send invite from this session.');
+      setTimeout(() => setConnectNotification(null), 5000);
       return false;
     } catch (e) {
       console.warn('Connection dispatch error:', e);
@@ -150,7 +175,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-[#0077b5] animate-pulse"></span>
             <span className="text-xs font-bold tracking-widest uppercase text-white">
-              Visual Knowledge Graph
+              LinkedIn Boss
             </span>
           </div>
 
@@ -159,10 +184,15 @@ export default function App() {
               <div className="text-[10px] uppercase font-bold tracking-wider text-sky-400">
                 Active User Perspective
               </div>
-              {liveNetworkMeta?.isLive && (
+              {liveNetworkMeta?.source === 'linkedin' && (
                 <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 border border-emerald-600/50 uppercase tracking-widest">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                  Live Network Active
+                  Live LinkedIn
+                </span>
+              )}
+              {liveNetworkMeta?.source === 'wikidata' && (
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-300 bg-amber-950/80 px-1.5 py-0.5 border border-amber-600/50 uppercase tracking-widest">
+                  Public Wikidata peers
                 </span>
               )}
             </div>
@@ -243,12 +273,30 @@ export default function App() {
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
             className={`absolute inset-0 ${selectedProfile ? 'pointer-events-none' : ''}`}
           >
-            <GalleryGlobe
-              profiles={profiles}
-              activeOverlayId={activeOverlayId}
-              overlayColor={activeOverlay.color}
-              onSelectProfile={(p) => setSelectedProfile(p)}
-            />
+            {profiles.length > 0 ? (
+              <GalleryGlobe
+                profiles={profiles}
+                activeOverlayId={activeOverlayId}
+                overlayColor={activeOverlay.color}
+                onSelectProfile={(p) => setSelectedProfile(p)}
+              />
+            ) : !isLoadingGlobe ? (
+              <div className="absolute inset-0 flex items-center justify-center p-8">
+                <div className="max-w-md text-center space-y-3 bg-slate-900/90 border border-slate-700 p-6">
+                  <p className="text-sm font-semibold text-white">No live people on the globe yet</p>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {networkError || 'Connect LinkedIn with a cookie export to load your real 1st-degree network, or enter a company Wikidata knows to plot public colleagues.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setIsLinkedInModalOpen(true)}
+                    className="px-4 py-2 bg-[#0077b5] text-white text-xs font-bold uppercase tracking-wider"
+                  >
+                    Connect LinkedIn
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </motion.div>
 
           {/* Bottom Left Relationship Overlays Controls */}

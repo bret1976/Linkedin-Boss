@@ -6,6 +6,7 @@ import * as THREE from 'three';
  */
 export function generateFibonacciSphere(samples: number, radius: number = 1): THREE.Vector3[] {
   const points: THREE.Vector3[] = [];
+  if (samples <= 1) return [new THREE.Vector3(0, radius, 0)];
   const phi = Math.PI * (3 - Math.sqrt(5)); // Golden angle in radians
 
   for (let i = 0; i < samples; i++) {

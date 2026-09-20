@@ -29,7 +29,7 @@ interface ProfileDetailsModalProps {
 
 export default function ProfileDetailsModal({
   profile,
-  userProfileName = 'Alex Morgan',
+  userProfileName = 'You',
   onClose,
   onConnect
 }: ProfileDetailsModalProps) {

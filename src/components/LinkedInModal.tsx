@@ -27,7 +27,7 @@ export default function LinkedInModal({
   onDisconnect,
   onRefresh
 }: LinkedInModalProps) {
-  const [activeTab, setActiveTab] = useState<'cookie' | 'profile' | 'quick'>('cookie');
+  const [activeTab, setActiveTab] = useState<'cookie' | 'profile'>('cookie');
   const [cookieInput, setCookieInput] = useState('');
   const [profileUrlInput, setProfileUrlInput] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -77,22 +77,6 @@ export default function LinkedInModal({
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (e: any) {
       setActionError(e.message || 'Failed to link profile');
-    }
-  };
-
-  const handleQuickConnect = async () => {
-    setActionError(null);
-    setActionSuccess(null);
-    try {
-      await onConnect({
-        type: 'quick-session',
-        name: displayName.trim() || 'Alex Morgan',
-        headline: headline.trim() || 'Creative Technologist & World Explorer'
-      });
-      setActionSuccess('Quick Demo Session connected!');
-      setTimeout(() => setActionSuccess(null), 3000);
-    } catch (e: any) {
-      setActionError(e.message || 'Failed to start quick session');
     }
   };
 
@@ -257,7 +241,7 @@ export default function LinkedInModal({
               </p>
 
               {/* Navigation Tabs */}
-              <div className="grid grid-cols-3 border border-gray-200 bg-gray-100 p-1 gap-1 text-xs">
+              <div className="grid grid-cols-2 border border-gray-200 bg-gray-100 p-1 gap-1 text-xs">
                 <button
                   type="button"
                   onClick={() => { setActiveTab('cookie'); setActionError(null); }}
@@ -281,18 +265,6 @@ export default function LinkedInModal({
                 >
                   <User className="w-3.5 h-3.5 text-[#0077b5]" />
                   <span className="truncate">Profile Link</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setActiveTab('quick'); setActionError(null); }}
-                  className={`py-2 px-2.5 text-center font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    activeTab === 'quick'
-                      ? 'bg-white text-gray-900 font-bold shadow-xs border border-gray-300'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="truncate">Quick Demo</span>
                 </button>
               </div>
 
@@ -445,67 +417,6 @@ export default function LinkedInModal({
                       <>
                         <Linkedin className="w-4 h-4 text-[#0077b5]" />
                         <span>Link Profile with Agent Reach</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {/* Tab 3: Quick Demo Session */}
-              {activeTab === 'quick' && (
-                <div className="space-y-4">
-                  <div className="p-4 bg-amber-50/60 border border-amber-200 text-xs text-amber-900 space-y-2">
-                    <div className="flex items-center gap-2 font-semibold">
-                      <Zap className="w-4 h-4 text-amber-600" />
-                      <span>Instant 1-Click Verification</span>
-                    </div>
-                    <p className="leading-relaxed text-[11px] text-amber-800">
-                      Instantly connect a verified Agent Reach LinkedIn test session. You can customize the name and headline, preview real feed shares, and test post dispatch immediately.
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                        Your Name
-                      </label>
-                      <input
-                        type="text"
-                        value={displayName}
-                        onChange={(e) => setDisplayName(e.target.value)}
-                        placeholder="Alex Morgan"
-                        className="w-full p-2 text-xs border border-gray-300 focus:outline-none focus:border-gray-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1">
-                        Headline
-                      </label>
-                      <input
-                        type="text"
-                        value={headline}
-                        onChange={(e) => setHeadline(e.target.value)}
-                        placeholder="Traveler & Creative Explorer"
-                        className="w-full p-2 text-xs border border-gray-300 focus:outline-none focus:border-gray-900"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleQuickConnect}
-                    disabled={isConnecting}
-                    className="w-full py-3.5 bg-gray-900 hover:bg-black text-white uppercase tracking-widest text-xs font-bold flex items-center justify-center gap-2 border border-gray-900 transition-colors cursor-pointer"
-                  >
-                    {isConnecting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Connecting Quick Session...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 text-amber-400" />
-                        <span>Start Quick Verified Session</span>
                       </>
                     )}
                   </button>

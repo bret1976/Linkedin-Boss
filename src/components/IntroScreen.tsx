@@ -20,36 +20,28 @@ interface IntroScreenProps {
 }
 
 export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProps) {
-  const [activeTab, setActiveTab] = useState<'upload' | 'manual' | 'demo' | 'linkedin'>('linkedin');
+  const [activeTab, setActiveTab] = useState<'upload' | 'manual' | 'linkedin'>('linkedin');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('');
 
   // Manual input form state
-  const [name, setName] = useState('Alex Morgan');
-  const [headline, setHeadline] = useState('Founder & CEO | AI Systems, B2B SaaS & Strategic Capital');
-  const [company, setCompany] = useState('Apex Horizon Labs');
-  const [industry, setIndustry] = useState('Artificial Intelligence & Software');
-  const [location, setLocation] = useState('San Francisco, CA');
-  const [skillsText, setSkillsText] = useState('Generative AI, Product Strategy, Venture Capital, B2B SaaS, Go-to-Market');
-  const [avatarUrl, setAvatarUrl] = useState('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80');
+  const [name, setName] = useState('');
+  const [headline, setHeadline] = useState('');
+  const [company, setCompany] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [location, setLocation] = useState('');
+  const [skillsText, setSkillsText] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const simulateGraphAnalysis = async (profileData: UserUploadedProfile) => {
+    if (!profileData.name.trim() || !profileData.headline.trim()) {
+      alert('Name and headline are required.');
+      return;
+    }
     setIsAnalyzing(true);
-    setAnalysisStep('Reading profile topology and competencies...');
-    await new Promise(r => setTimeout(r, 600));
-
-    setAnalysisStep('Traversing 1st-degree contacts & mutual bridges...');
-    await new Promise(r => setTimeout(r, 700));
-
-    setAnalysisStep('Synthesizing 2nd-degree executive clusters & venture nodes...');
-    await new Promise(r => setTimeout(r, 600));
-
-    setAnalysisStep('Mapping synergy scorecard & best match alignments...');
-    await new Promise(r => setTimeout(r, 500));
-
-    setIsAnalyzing(false);
+    setAnalysisStep('Looking up live people for this company and profile...');
     onStart(profileData);
   };
 
@@ -74,80 +66,53 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
           };
           simulateGraphAnalysis(profile);
         } catch {
-          alert('Could not parse JSON. Starting with default profile structure.');
-          handleStartDemo();
+          alert('Could not parse that JSON profile.');
         }
       };
       reader.readAsText(file);
-    } else {
-      // Text or Image upload
+    } else if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (event) => {
-        const uploadedImg = event.target?.result as string;
-        const profile: UserUploadedProfile = {
-          name: file.name.split('.')[0].replace(/[-_]/g, ' ') || 'Uploaded Executive',
-          headline: 'Enterprise Technology & Strategic Alliances Lead',
-          company: 'Nexus Digital Ventures',
-          industry: 'Software & Cloud Solutions',
-          location: 'San Francisco / New York',
-          skills: ['Strategic Partnerships', 'Generative AI', 'B2B Enterprise', 'Growth Strategy'],
-          avatarUrl: uploadedImg.startsWith('data:image') ? uploadedImg : avatarUrl
-        };
-        simulateGraphAnalysis(profile);
+        setAvatarUrl(event.target?.result as string);
+        setActiveTab('manual');
       };
-      if (file.type.startsWith('image/')) {
-        reader.readAsDataURL(file);
-      } else {
-        reader.readAsText(file);
-      }
+      reader.readAsDataURL(file);
+    } else {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const text = String(event.target?.result || '');
+        try {
+          const res = await fetch('/api/profile/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+          });
+          const data = await res.json();
+          if (!data.success || !data.profile) throw new Error(data.error || 'Analyze failed');
+          simulateGraphAnalysis({
+            name: data.profile.name,
+            headline: data.profile.headline,
+            company: data.profile.company,
+            industry: data.profile.industry,
+            location: data.profile.location,
+            skills: data.profile.skills || [],
+            avatarUrl
+          });
+        } catch (err: any) {
+          alert(err.message || 'Could not read that file as a profile.');
+        }
+      };
+      reader.readAsText(file);
     }
-  };
-
-  const handleStartDemo = (presetIndex: number = 0) => {
-    const presets: UserUploadedProfile[] = [
-      {
-        name: 'Alex Morgan',
-        headline: 'Founder & CEO | AI Systems, B2B SaaS & Strategic Capital',
-        company: 'Apex Horizon Labs',
-        industry: 'Artificial Intelligence & Software',
-        location: 'San Francisco, CA',
-        skills: ['Generative AI', 'Product Strategy', 'Venture Capital', 'B2B SaaS', 'Spatial Computing'],
-        avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80',
-        connectionsCount: 840
-      },
-      {
-        name: 'Jordan Rivera',
-        headline: 'Managing Director | Corporate Venture, M&A & Global Alliances',
-        company: 'Vanguard Growth Partners',
-        industry: 'Venture Capital & Private Equity',
-        location: 'New York, NY',
-        skills: ['Venture Capital', 'Strategic Alliances', 'M&A Deal Sourcing', 'Enterprise Pilots'],
-        avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&auto=format&fit=crop&q=80',
-        connectionsCount: 1200
-      },
-      {
-        name: 'Maya Chen',
-        headline: 'VP Engineering & AI Architect | Distributed Cloud & Multi-Agent Systems',
-        company: 'Synthetix Tech',
-        industry: 'Computer Software & Cloud',
-        location: 'Seattle, WA',
-        skills: ['Distributed Systems', 'Three.js', 'LLM Architectures', 'Cloud Infrastructure'],
-        avatarUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&auto=format&fit=crop&q=80',
-        connectionsCount: 650
-      }
-    ];
-
-    const selected = presets[presetIndex] || presets[0];
-    simulateGraphAnalysis(selected);
   };
 
   const handleStartManual = () => {
     const profile: UserUploadedProfile = {
-      name: name.trim() || 'Professional Leader',
-      headline: headline.trim() || 'Technology & Business Leader',
-      company: company.trim() || 'Global Enterprise',
-      industry: industry.trim() || 'Technology & Innovation',
-      location: location.trim() || 'Worldwide',
+      name: name.trim(),
+      headline: headline.trim(),
+      company: company.trim(),
+      industry: industry.trim(),
+      location: location.trim(),
       skills: skillsText.split(',').map(s => s.trim()).filter(Boolean),
       avatarUrl: avatarUrl
     };
@@ -165,7 +130,7 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
         </div>
 
         <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-gray-900 leading-tight">
-          Map & Connect With Your Best Match Profiles
+          LinkedIn Boss
         </h1>
 
         <p className="text-xs sm:text-sm text-gray-500 mt-2 max-w-md">
@@ -203,17 +168,6 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
               >
                 <Linkedin className="w-3.5 h-3.5 text-[#0077b5]" />
                 <span>Connect Live LinkedIn</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('demo')}
-                className={`flex-1 py-3 px-3 border-b-2 transition-colors cursor-pointer ${
-                  activeTab === 'demo'
-                    ? 'border-[#0077b5] text-[#0077b5] bg-sky-50/40'
-                    : 'border-transparent text-gray-500 hover:text-gray-900'
-                }`}
-              >
-                Executive Presets
               </button>
               <button
                 type="button"
@@ -273,83 +227,6 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
                     <span>Instant session verification</span>
                     <span>•</span>
                     <span>Full visual knowledge graph</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Tab 1: Instant Presets */}
-            {activeTab === 'demo' && (
-              <div className="p-6 text-left space-y-4">
-                <p className="text-xs text-gray-600">
-                  Select an executive profile to instantly spin up the 3D network graph with synthesized 1st & 2nd-degree connections:
-                </p>
-
-                <div className="space-y-2.5">
-                  <div
-                    onClick={() => handleStartDemo(0)}
-                    className="p-3.5 border border-gray-200 hover:border-[#0077b5] hover:bg-sky-50/40 transition-all cursor-pointer flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
-                        alt="Alex Morgan"
-                        className="w-11 h-11 rounded-full object-cover border"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-gray-900 group-hover:text-[#0077b5]">
-                          Alex Morgan (AI Founder & CEO)
-                        </div>
-                        <div className="text-[11px] text-gray-500">
-                          Focus: Generative AI, B2B SaaS, Seed/Series A Capital
-                        </div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-[#0077b5] group-hover:translate-x-0.5 transition-transform" />
-                  </div>
-
-                  <div
-                    onClick={() => handleStartDemo(1)}
-                    className="p-3.5 border border-gray-200 hover:border-[#0077b5] hover:bg-sky-50/40 transition-all cursor-pointer flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80"
-                        alt="Jordan Rivera"
-                        className="w-11 h-11 rounded-full object-cover border"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-gray-900 group-hover:text-[#0077b5]">
-                          Jordan Rivera (Venture Partner & M&A)
-                        </div>
-                        <div className="text-[11px] text-gray-500">
-                          Focus: Deal Syndication, Corporate Venture, Growth Equity
-                        </div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-[#0077b5] group-hover:translate-x-0.5 transition-transform" />
-                  </div>
-
-                  <div
-                    onClick={() => handleStartDemo(2)}
-                    className="p-3.5 border border-gray-200 hover:border-[#0077b5] hover:bg-sky-50/40 transition-all cursor-pointer flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <img
-                        src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=100&auto=format&fit=crop&q=80"
-                        alt="Maya Chen"
-                        className="w-11 h-11 rounded-full object-cover border"
-                      />
-                      <div>
-                        <div className="text-xs font-bold text-gray-900 group-hover:text-[#0077b5]">
-                          Maya Chen (VP Engineering & Distributed Systems)
-                        </div>
-                        <div className="text-[11px] text-gray-500">
-                          Focus: Three.js, Multi-Agent AI, Spatial Computing
-                        </div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-gray-400 group-hover:text-[#0077b5] group-hover:translate-x-0.5 transition-transform" />
                   </div>
                 </div>
               </div>

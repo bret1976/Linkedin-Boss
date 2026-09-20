@@ -1,64 +1,52 @@
 import { LinkedInMatchProfile, UserUploadedProfile } from '../types/knowledgeGraph';
-import { SEED_LINKEDIN_PROFILES } from '../data/networkGraphData';
 
-/**
- * Deterministic hash algorithm to compute stable contextual weights based on user profile text.
- */
-function hashText(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
+export type CandidateProfile = Omit<LinkedInMatchProfile, 'matchScore' | 'scorecard' | 'keyAlignmentReasons' | 'recommendedPitch'>;
 
 /**
  * Calculates a personalized matching scorecard and reasoning for a target profile
  * relative to the uploaded/active user profile.
  */
 export function calculateProfileMatch(
-  seed: typeof SEED_LINKEDIN_PROFILES[0],
+  seed: CandidateProfile,
   user: UserUploadedProfile
 ): LinkedInMatchProfile {
-  const userText = `${user.name} ${user.headline} ${user.industry} ${user.skills.join(' ')} ${user.company || ''}`.toLowerCase();
-  const targetText = `${seed.name} ${seed.headline} ${seed.industry} ${seed.skills.join(' ')} ${seed.company}`.toLowerCase();
+  const userSkills = user.skills || [];
+  const seedSkills = seed.skills || [];
+  const userText = `${user.name} ${user.headline} ${user.industry} ${userSkills.join(' ')} ${user.company || ''}`.toLowerCase();
+  const targetText = `${seed.name} ${seed.headline} ${seed.industry} ${seedSkills.join(' ')} ${seed.company}`.toLowerCase();
 
   // 1. Calculate shared skill overlap
-  const sharedSkills = seed.skills.filter(skill => 
+  const sharedSkills = seedSkills.filter(skill => 
     userText.includes(skill.toLowerCase()) || 
-    user.skills.some(us => us.toLowerCase().includes(skill.toLowerCase()) || skill.toLowerCase().includes(us.toLowerCase()))
+    userSkills.some(us => us.toLowerCase().includes(skill.toLowerCase()) || skill.toLowerCase().includes(us.toLowerCase()))
   );
 
-  const baseHash = hashText(`${user.name}:${seed.id}`);
-  const synergyJitter = (baseHash % 16) - 8;
+  let businessSynergy = 55 + Math.min(40, sharedSkills.length * 8);
+  let networkOverlap = seed.connectionDegree === '1st' ? 88 : seed.connectionDegree === '2nd' ? 70 : 45;
+  if (seed.mutualConnectionsCount) networkOverlap += Math.min(12, Math.floor(seed.mutualConnectionsCount / 5));
 
-  // 2. Compute component scores (0 - 100)
-  let businessSynergy = 78 + Math.min(18, sharedSkills.length * 6) + synergyJitter;
-  let networkOverlap = seed.connectionDegree === '1st' ? 92 : seed.connectionDegree === '2nd' ? 84 : 72;
-  networkOverlap += Math.min(10, Math.floor(seed.mutualConnectionsCount / 5));
-
-  let industryAlignment = 75;
+  let industryAlignment = 48;
   if (user.industry && (
-    targetText.includes(user.industry.toLowerCase()) || 
+    targetText.includes(user.industry.toLowerCase()) ||
     userText.includes(seed.industry.toLowerCase()) ||
     (userText.includes('tech') && targetText.includes('tech')) ||
     (userText.includes('ai') && targetText.includes('ai'))
   )) {
-    industryAlignment = 94;
-  } else {
-    industryAlignment += (baseHash % 12);
+    industryAlignment = 86;
+  }
+  if (user.company && targetText.includes(user.company.toLowerCase())) {
+    industryAlignment = Math.min(96, industryAlignment + 10);
+    networkOverlap = Math.min(96, networkOverlap + 8);
   }
 
   let collaborationPotential = Math.round(
     (businessSynergy * 0.4) + (networkOverlap * 0.3) + (industryAlignment * 0.3)
   );
 
-  // Clamp 65 - 99
-  businessSynergy = Math.min(99, Math.max(68, businessSynergy));
-  networkOverlap = Math.min(99, Math.max(65, networkOverlap));
-  industryAlignment = Math.min(99, Math.max(66, industryAlignment));
-  collaborationPotential = Math.min(99, Math.max(70, collaborationPotential));
+  businessSynergy = Math.min(99, Math.max(20, businessSynergy));
+  networkOverlap = Math.min(99, Math.max(15, networkOverlap));
+  industryAlignment = Math.min(99, Math.max(20, industryAlignment));
+  collaborationPotential = Math.min(99, Math.max(20, collaborationPotential));
 
   const overallMatch = Math.round(
     businessSynergy * 0.35 +
@@ -117,15 +105,7 @@ export function calculateProfileMatch(
 }
 
 /**
- * Candidate seed profile interface accepted by graph matching.
- */
-export type CandidateProfile = Omit<LinkedInMatchProfile, 'matchScore' | 'scorecard' | 'keyAlignmentReasons' | 'recommendedPitch'>;
-
-/**
- * Builds the full array of analyzed LinkedIn profiles mapped across the 48 globe positions.
- * If liveConnections are provided (e.g. from the connected LinkedIn account), they are utilized
- * directly. If not, the engine synthesizes a personalized network ecosystem based on the user's
- * real name, company, industry, and skills.
+ * Score live people against the uploaded profile. Empty input → empty globe.
  */
 export function generateAnalyzedProfiles(
   user: UserUploadedProfile,
@@ -134,48 +114,12 @@ export function generateAnalyzedProfiles(
 ): LinkedInMatchProfile[] {
   const analyzed: LinkedInMatchProfile[] = [];
 
-  // Determine source profiles
-  let sourceProfiles: CandidateProfile[] = [];
+  if (!customConnections?.length) return [];
+  const sourceProfiles: CandidateProfile[] = customConnections;
 
-  if (customConnections && customConnections.length > 0) {
-    sourceProfiles = [...customConnections];
-  } else {
-    // Generate an authentic personalized network around the connected user
-    // ensuring 1st, 2nd, and 3rd degree connections dynamically anchor to user's identity
-    sourceProfiles = SEED_LINKEDIN_PROFILES.map((seed, idx) => {
-      // Personalize mutual connections and shared references to the connected user
-      const mutuals = seed.sharedMutualConnections ? [...seed.sharedMutualConnections] : [];
-      if (!mutuals.includes(user.name)) {
-        mutuals[0] = user.name;
-      }
-
-      // If degree is 1st, relate company or industry directly to user's orbit
-      let company = seed.company;
-      if (seed.connectionDegree === '1st' && idx % 3 === 0 && user.company) {
-        company = `${user.company} Partner`;
-      }
-
-      return {
-        ...seed,
-        company,
-        sharedMutualConnections: mutuals,
-      };
-    });
-  }
-
-  const poolCount = sourceProfiles.length;
-
-  for (let i = 0; i < totalCards; i++) {
-    const candidate = sourceProfiles[i % poolCount];
-    const indexSuffix = i >= poolCount ? `-${Math.floor(i / poolCount) + 1}` : '';
-    const instanceCandidate: CandidateProfile = {
-      ...candidate,
-      id: `${candidate.id}${indexSuffix}`,
-      name: i >= poolCount ? candidate.name : candidate.name
-    };
-
-    const calculated = calculateProfileMatch(instanceCandidate, user);
-    analyzed.push(calculated);
+  const cap = Math.min(sourceProfiles.length, totalCards);
+  for (let i = 0; i < cap; i++) {
+    analyzed.push(calculateProfileMatch(sourceProfiles[i], user));
   }
 
   // Sort descending by match score so best matches appear prominently
