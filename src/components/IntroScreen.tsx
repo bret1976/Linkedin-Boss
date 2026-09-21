@@ -17,9 +17,11 @@ import { UserUploadedProfile } from '../types/knowledgeGraph';
 interface IntroScreenProps {
   onStart: (profile: UserUploadedProfile) => void;
   onOpenLinkedIn?: (profileUrl?: string) => void;
+  connecting?: boolean;
+  connectStatus?: string;
 }
 
-export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProps) {
+export default function IntroScreen({ onStart, onOpenLinkedIn, connecting, connectStatus }: IntroScreenProps) {
   const [activeTab, setActiveTab] = useState<'upload' | 'manual' | 'linkedin'>('linkedin');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisStep, setAnalysisStep] = useState<string>('');
@@ -135,7 +137,7 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
         </h1>
 
         <p className="text-xs sm:text-sm text-gray-500 mt-2 max-w-md">
-          Upload your LinkedIn profile to analyze your network, traverse 1st & 2nd-degree contacts, and project your highest-alignment business matches onto an interactive 3D relationship sphere.
+          Paste your LinkedIn URL, then connect in Chrome. We read your live session and load your real contacts.
         </p>
 
         {isAnalyzing ? (
@@ -224,13 +226,23 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
                   />
                   <button
                     type="button"
+                    disabled={connecting || !/linkedin\.com\/in\//i.test(linkedinUrl)}
                     onClick={() => onOpenLinkedIn && onOpenLinkedIn(linkedinUrl.trim())}
-                    className="w-full py-3.5 bg-[#0077b5] hover:bg-[#005c8d] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    className="w-full py-3.5 bg-[#0077b5] hover:bg-[#005c8d] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
                   >
                     <Linkedin className="w-4 h-4" />
-                    <span>Step 2 · Connect LinkedIn in Chrome</span>
+                    <span>
+                      {connecting
+                        ? connectStatus || "Opening Chrome…"
+                        : "Step 2 · Connect LinkedIn in Chrome"}
+                    </span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
+                  {connecting && (
+                    <p className="text-xs text-sky-800 bg-sky-50 border border-sky-200 p-3 leading-relaxed">
+                      {connectStatus || "Google Chrome is opening on LinkedIn. Log in in that window if it asks. Stay there until this page says it found your session."}
+                    </p>
+                  )}
 
                   <div className="flex items-center justify-between text-[10px] text-gray-500 pt-1 px-1">
                     <span>Zero API subscription fees</span>

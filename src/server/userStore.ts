@@ -67,6 +67,13 @@ function verifyPassword(password: string, stored: string) {
   return timingSafeEqual(next, prev);
 }
 
+export function createGuest() {
+  const email = `guest-${randomBytes(6).toString("hex")}@local.linkedin-boss`;
+  const user = registerUser(email, `${randomBytes(12).toString("hex")}Aa1!`);
+  const token = createSession(user.id);
+  return { user, token };
+}
+
 export function registerUser(email: string, password: string): StoredUser {
   const users = readUsers();
   const key = email.trim().toLowerCase();

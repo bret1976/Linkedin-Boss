@@ -21,6 +21,7 @@ import {
   clearLinkedIn,
   contactsPath,
   cookieFromReq,
+  createGuest,
   createSession,
   deleteContacts,
   destroySession,
@@ -712,12 +713,11 @@ Do not include any other text or introductory phrases.`,
   });
 
   app.post("/api/linkedin/one-click", async (req, res) => {
-    const user = currentUser(req);
+    let user = currentUser(req);
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: "Sign in first, then click the button. Chrome will open so you can log into LinkedIn.",
-      });
+      const guest = createGuest();
+      user = guest.user;
+      res.setHeader("Set-Cookie", `lb_sid=${guest.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
     }
     const existing = sessionFor(req);
     if (existing?.sessionCookie) {

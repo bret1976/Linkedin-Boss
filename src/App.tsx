@@ -7,7 +7,6 @@ import GraphOverlayControls from './components/GraphOverlayControls';
 import LoadingOverlay from './components/LoadingOverlay';
 import LinkedInButton from './components/LinkedInButton';
 import LinkedInModal from './components/LinkedInModal';
-import AuthScreen from './components/AuthScreen';
 import ContactsTable from './components/ContactsTable';
 import { useLinkedIn } from './hooks/useLinkedIn';
 import { LinkedInMatchProfile, UserUploadedProfile } from './types/knowledgeGraph';
@@ -196,6 +195,12 @@ export default function App() {
   };
 
   const handleLoadContacts = async (profileUrl?: string) => {
+    if (!profileUrl || !/linkedin\.com\/in\//i.test(profileUrl)) {
+      setNetworkError("Paste your LinkedIn profile URL first (linkedin.com/in/you).");
+      setConnectNotification("Paste your LinkedIn profile URL first.");
+      setTimeout(() => setConnectNotification(null), 5000);
+      return;
+    }
     setExtracting(true);
     setExtractStatus("Opening Chrome…");
     setNetworkError(null);
@@ -272,9 +277,6 @@ export default function App() {
 
   if (!authChecked) {
     return <div className="w-full h-full bg-white" />;
-  }
-  if (!accountEmail) {
-    return <AuthScreen onReady={(email) => setAccountEmail(email)} />;
   }
 
   return (
@@ -366,6 +368,8 @@ export default function App() {
               setIsLoadingGlobe(true);
             }}
             onOpenLinkedIn={(profileUrl) => void handleLoadContacts(profileUrl)}
+            connecting={extracting}
+            connectStatus={extractStatus}
           />
         </div>
       ) : (
