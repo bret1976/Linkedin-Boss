@@ -723,7 +723,8 @@ Do not include any other text or introductory phrases.`,
     if (existing?.sessionCookie) {
       return res.json({ success: true, alreadyConnected: true, message: "Session already saved. Extracting contacts." });
     }
-    const job = await captureLinkedInLogin(user.id);
+    const profileUrl = String(req.body?.profileUrl || "").trim();
+    const job = await captureLinkedInLogin(user.id, profileUrl || undefined);
     res.json({ success: true, running: job.running, message: job.message });
   });
 

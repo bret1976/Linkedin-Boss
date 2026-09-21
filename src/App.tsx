@@ -195,12 +195,16 @@ export default function App() {
     }
   };
 
-  const handleLoadContacts = async () => {
+  const handleLoadContacts = async (profileUrl?: string) => {
     setExtracting(true);
     setExtractStatus("Opening Chrome…");
     setNetworkError(null);
     try {
-      const start = await fetch("/api/linkedin/one-click", { method: "POST" });
+      const start = await fetch("/api/linkedin/one-click", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileUrl: profileUrl || "" }),
+      });
       const started = await start.json();
       if (!started.success) throw new Error(started.error || "Could not start LinkedIn login");
       if (!started.alreadyConnected) {
@@ -361,7 +365,7 @@ export default function App() {
               setUserProfile(profile);
               setIsLoadingGlobe(true);
             }}
-            onOpenLinkedIn={() => void handleLoadContacts()}
+            onOpenLinkedIn={(profileUrl) => void handleLoadContacts(profileUrl)}
           />
         </div>
       ) : (

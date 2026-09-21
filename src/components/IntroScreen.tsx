@@ -16,7 +16,7 @@ import { UserUploadedProfile } from '../types/knowledgeGraph';
 
 interface IntroScreenProps {
   onStart: (profile: UserUploadedProfile) => void;
-  onOpenLinkedIn?: () => void;
+  onOpenLinkedIn?: (profileUrl?: string) => void;
 }
 
 export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProps) {
@@ -32,6 +32,7 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
   const [location, setLocation] = useState('');
   const [skillsText, setSkillsText] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [linkedinUrl, setLinkedinUrl] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -205,19 +206,29 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
                       Live LinkedIn Profile & Network Integration
                     </h4>
                     <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
-                      One button opens Chrome. Log into LinkedIn in that window. We capture the session and extract your contacts. No Cookie-Editor, no CSV download from LinkedIn.
+                      Two steps. Paste your profile URL, then click Connect. Real Google Chrome opens on LinkedIn — log in there if needed. We read the session from that window (HttpOnly cookies LinkedIn requires). No Cookie-Editor, no bot browser.
                     </p>
                   </div>
                 </div>
 
                 <div className="space-y-3 pt-2">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                    Step 1 · Your LinkedIn profile URL
+                  </label>
+                  <input
+                    type="url"
+                    value={linkedinUrl}
+                    onChange={(e) => setLinkedinUrl(e.target.value)}
+                    placeholder="https://www.linkedin.com/in/you"
+                    className="w-full p-2.5 text-sm border border-gray-300"
+                  />
                   <button
                     type="button"
-                    onClick={() => onOpenLinkedIn && onOpenLinkedIn()}
+                    onClick={() => onOpenLinkedIn && onOpenLinkedIn(linkedinUrl.trim())}
                     className="w-full py-3.5 bg-[#0077b5] hover:bg-[#005c8d] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                   >
                     <Linkedin className="w-4 h-4" />
-                    <span>Load my LinkedIn contacts</span>
+                    <span>Step 2 · Connect LinkedIn in Chrome</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
 
