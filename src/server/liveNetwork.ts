@@ -31,15 +31,20 @@ export function parseLinkedInCookies(raw: string): CookieJar | null {
   let liAt = "";
   let jsession = "";
 
-  if (text.startsWith("[") && text.endsWith("]")) {
+  const take = (name: string, value: string) => {
+    const n = name.trim();
+    const v = String(value || "").trim().replace(/^"|"$/g, "");
+    if (n === "li_at" || n === "li_a") liAt = v;
+    if (n === "JSESSIONID" || n === "jsessionid") jsession = v;
+  };
+
+  if (text.startsWith("[") || text.startsWith("{")) {
     try {
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          const name = String(item?.name || "");
-          const value = String(item?.value || "");
-          if (name === "li_at") liAt = value;
-          if (name === "JSESSIONID") jsession = value.replace(/^"|"$/g, "");
+      const rows = Array.isArray(parsed) ? parsed : parsed.cookies || parsed.Cookies || [];
+      if (Array.isArray(rows)) {
+        for (const item of rows) {
+          take(String(item?.name || item?.Name || ""), String(item?.value || item?.Value || ""));
         }
       }
     } catch {
@@ -48,19 +53,21 @@ export function parseLinkedInCookies(raw: string): CookieJar | null {
   }
 
   const cookieMap = new Map<string, string>();
-  for (const part of text.split(";")) {
+  for (const part of text.split(/;\s*/)) {
     const idx = part.indexOf("=");
     if (idx < 1) continue;
     cookieMap.set(part.slice(0, idx).trim(), part.slice(idx + 1).trim().replace(/^"|"$/g, ""));
   }
-  if (!liAt) liAt = cookieMap.get("li_at") || "";
+  if (!liAt) liAt = cookieMap.get("li_at") || cookieMap.get("li_a") || "";
   if (!jsession) jsession = cookieMap.get("JSESSIONID") || "";
 
-  if (!liAt && /^AQE/i.test(text) && !text.includes("=")) liAt = text;
+  const named = text.match(/\bli_at["']?\s*[:=]\s*["']?([A-Za-z0-9_\-]+)/);
+  if (!liAt && named?.[1]) liAt = named[1];
+  if (!liAt && /^AQE/i.test(text) && !text.includes("=")) liAt = text.replace(/\s+/g, "");
   if (!liAt && text.startsWith("li_at=")) liAt = text.replace(/^li_at=/, "").split(";")[0].trim();
 
   if (!liAt || liAt.length < 10) return null;
-  if (jsession && !jsession.startsWith("ajax:")) jsession = jsession.startsWith("ajax") ? jsession : `ajax:${jsession}`;
+  if (jsession && !jsession.startsWith("ajax:")) jsession = jsession.includes("ajax") ? jsession : `ajax:${jsession}`;
   return { liAt, jsession };
 }
 
@@ -79,19 +86,22 @@ export function voyagerHeaders(jar: CookieJar): Record<string, string> {
 }
 
 export async function discoverJsession(liAt: string): Promise<string> {
-  try {
-    const res = await fetch("https://www.linkedin.com/feed/", {
-      method: "GET",
-      redirect: "manual",
-      headers: { Cookie: `li_at=${liAt}`, "User-Agent": UA },
-    });
-    const setCookie = res.headers.getSetCookie?.() || [];
-    const joined = setCookie.join("; ") + (res.headers.get("set-cookie") || "");
-    const match = joined.match(/JSESSIONID="?(ajax:[^";]+)/i);
-    return match?.[1] || "";
-  } catch {
-    return "";
+  for (const url of ["https://www.linkedin.com/feed/", "https://www.linkedin.com/", "https://www.linkedin.com/mynetwork/"]) {
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        redirect: "manual",
+        headers: { Cookie: `li_at=${liAt}`, "User-Agent": UA, Accept: "text/html" },
+      });
+      const setCookie = typeof res.headers.getSetCookie === "function" ? res.headers.getSetCookie() : [];
+      const joined = [...setCookie, res.headers.get("set-cookie") || ""].join("; ");
+      const match = joined.match(/JSESSIONID="?(ajax:[^";]+)/i);
+      if (match?.[1]) return match[1];
+    } catch {
+      /* next */
+    }
   }
+  return "";
 }
 
 function layerFromHeadline(headline: string): LivePerson["graphLayer"] {
@@ -171,18 +181,24 @@ function skillsFromText(...parts: string[]): string[] {
 
 export async function fetchVoyagerMe(jar: CookieJar) {
   const res = await fetch("https://www.linkedin.com/voyager/api/me", { headers: voyagerHeaders(jar) });
-  if (!res.ok) throw new Error(`LinkedIn session rejected (${res.status}). Paste a fresh li_at + JSESSIONID cookie export.`);
+  if (!res.ok) {
+    const err = new Error(`LinkedIn session rejected (${res.status}). Export a fresh Cookie-Editor JSON while you are logged into linkedin.com.`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   const data = (await res.json()) as Record<string, unknown>;
   const included = (Array.isArray(data.included) ? data.included : []) as Record<string, unknown>[];
   const mini =
-    included.find((e) => e.firstName || (e.miniProfile as Record<string, unknown> | undefined)?.firstName) || {};
+    (data.miniProfile as Record<string, unknown> | undefined) ||
+    included.find((e) => e.firstName || (e.miniProfile as Record<string, unknown> | undefined)?.firstName) ||
+    {};
   const profile = ((mini.miniProfile as Record<string, unknown>) || mini) as Record<string, unknown>;
-  const first = String(profile.firstName || "");
-  const last = String(profile.lastName || "");
-  const publicId = String(profile.publicIdentifier || "");
+  const first = String(profile.firstName || data.firstName || "");
+  const last = String(profile.lastName || data.lastName || "");
+  const publicId = String(profile.publicIdentifier || data.publicIdentifier || "");
   return {
     name: `${first} ${last}`.trim() || "LinkedIn member",
-    headline: String(profile.occupation || ""),
+    headline: String(profile.occupation || profile.headline || ""),
     username: publicId,
     profile_url: publicId ? `https://www.linkedin.com/in/${publicId}` : "https://www.linkedin.com",
     avatar_url: "",
@@ -243,59 +259,133 @@ function collectMinis(data: Record<string, unknown>): Record<string, unknown>[] 
   return rows;
 }
 
+export type ExtractResult = { people: LivePerson[]; error?: string; lastStatus?: number };
+
+function ingestPeople(out: LivePerson[], seen: Set<string>, items: Record<string, unknown>[], userName: string, degree: LivePerson["connectionDegree"]) {
+  let added = 0;
+  for (const item of items) {
+    const person = personFromMini(item, userName, degree);
+    if (!person) continue;
+    const key = person.profileUrl.toLowerCase();
+    if (seen.has(key) || seen.has(person.name.toLowerCase())) continue;
+    seen.add(key);
+    seen.add(person.name.toLowerCase());
+    out.push(person);
+    added++;
+  }
+  return added;
+}
+
+async function scrapeConnectionsHtml(jar: CookieJar, userName: string, seen: Set<string>, out: LivePerson[]) {
+  const res = await fetch("https://www.linkedin.com/mynetwork/invite-connect/connections/", {
+    headers: { ...voyagerHeaders(jar), Accept: "text/html,application/xhtml+xml" },
+  });
+  if (!res.ok) return res.status;
+  const html = await res.text();
+  const blobs = [...html.matchAll(/<code[^>]*>([\s\S]*?)<\/code>/gi)].map((m) =>
+    m[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&#39;/g, "'"),
+  );
+  for (const blob of blobs) {
+    if (!blob.includes("publicIdentifier") && !blob.includes("firstName")) continue;
+    try {
+      const data = JSON.parse(blob);
+      const rows = collectMinis(typeof data === "object" && data ? data : {});
+      if (Array.isArray(data)) data.forEach((item) => typeof item === "object" && item && rows.push(item));
+      ingestPeople(out, seen, rows, userName, "1st");
+    } catch {
+      const ids = [...blob.matchAll(/"publicIdentifier"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+      const firsts = [...blob.matchAll(/"firstName"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+      const lasts = [...blob.matchAll(/"lastName"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+      const occs = [...blob.matchAll(/"occupation"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+      for (let i = 0; i < ids.length; i++) {
+        ingestPeople(
+          out,
+          seen,
+          [
+            {
+              firstName: firsts[i] || "",
+              lastName: lasts[i] || "",
+              publicIdentifier: ids[i],
+              occupation: occs[i] || "",
+            },
+          ],
+          userName,
+          "1st",
+        );
+      }
+    }
+  }
+  return res.status;
+}
+
 export async function extractFirstDegree(
   jar: CookieJar,
   userName: string,
   opts: { max?: number; onProgress?: (count: number) => void } = {},
-): Promise<LivePerson[]> {
+): Promise<ExtractResult> {
   const max = opts.max ?? 8000;
   const pageSize = 50;
   const seen = new Set<string>();
   const out: LivePerson[] = [];
+  let lastStatus = 0;
   const bases = [
     (start: number) =>
       `https://www.linkedin.com/voyager/api/relationships/dash/connections?decorationId=com.linkedin.voyager.dash.deco.relationships.Connection-26&count=${pageSize}&start=${start}&q=search`,
     (start: number) =>
       `https://www.linkedin.com/voyager/api/relationships/connections?count=${pageSize}&start=${start}&sortType=RECENTLY_ADDED`,
+    (start: number) =>
+      `https://www.linkedin.com/voyager/api/search/hits?q=people&origin=MEMBER_PROFILE_CANNED_SEARCH&count=${pageSize}&start=${start}&facetNetwork=${encodeURIComponent('["F"]')}`,
   ];
 
   for (const makeUrl of bases) {
     let emptyPages = 0;
     for (let start = 0; start < max; start += pageSize) {
-      let batch: LivePerson[] = [];
+      let added = 0;
       try {
         const res = await fetch(makeUrl(start), { headers: voyagerHeaders(jar) });
+        lastStatus = res.status;
         if (!res.ok) {
           emptyPages++;
           if (emptyPages >= 2) break;
           continue;
         }
         const data = (await res.json()) as Record<string, unknown>;
-        for (const item of collectMinis(data)) {
-          const person = personFromMini(item, userName, "1st");
-          if (!person) continue;
-          const key = person.profileUrl.toLowerCase();
-          if (seen.has(key) || seen.has(person.name.toLowerCase())) continue;
-          seen.add(key);
-          seen.add(person.name.toLowerCase());
-          batch.push(person);
-          out.push(person);
-        }
+        added = ingestPeople(out, seen, collectMinis(data), userName, "1st");
       } catch {
         emptyPages++;
       }
       opts.onProgress?.(out.length);
-      if (!batch.length) {
+      if (!added) {
         emptyPages++;
         if (emptyPages >= 2) break;
       } else {
         emptyPages = 0;
       }
-      await sleep(400);
+      await sleep(350);
     }
     if (out.length) break;
   }
-  return out;
+
+  if (!out.length) {
+    try {
+      lastStatus = await scrapeConnectionsHtml(jar, userName, seen, out);
+      opts.onProgress?.(out.length);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (!out.length) {
+    return {
+      people: [],
+      lastStatus,
+      error:
+        lastStatus === 401 || lastStatus === 403
+          ? `LinkedIn rejected the session (${lastStatus}). Export a fresh Cookie-Editor JSON while logged into linkedin.com — a profile URL cannot list contacts.`
+          : `LinkedIn returned no connections (HTTP ${lastStatus || "no response"}). The cookie is missing, expired, or LinkedIn blocked the extract.`,
+    };
+  }
+  return { people: out, lastStatus };
 }
 
 export async function extractSecondDegree(
@@ -342,7 +432,8 @@ export async function extractSecondDegree(
 }
 
 export async function fetchVoyagerConnections(jar: CookieJar, userName: string): Promise<LivePerson[]> {
-  return extractFirstDegree(jar, userName, { max: 8000 });
+  const result = await extractFirstDegree(jar, userName, { max: 8000 });
+  return result.people;
 }
 
 export function connectionsToCsv(people: LivePerson[]): string {

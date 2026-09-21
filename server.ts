@@ -376,7 +376,7 @@ Do not include any other text or introductory phrases.`,
     if (user?.linkedin && typeof user.linkedin === "object") {
       return user.linkedin as unknown as LinkedInSession;
     }
-    return activeLinkedInSession;
+    return null;
   }
 
   function persistSession(req: express.Request, session: LinkedInSession | null) {
@@ -492,7 +492,23 @@ Do not include any other text or introductory phrases.`,
           jar.jsession = await discoverJsession(jar.liAt);
         }
 
-        const me = await fetchVoyagerMe(jar);
+        let me = {
+          name: name?.trim() || "LinkedIn member",
+          headline: headline?.trim() || "",
+          username: "",
+          profile_url: "https://www.linkedin.com",
+          avatar_url: "",
+        };
+        try {
+          me = await fetchVoyagerMe(jar);
+        } catch (err: any) {
+          if (!jar.jsession) {
+            return res.status(400).json({
+              success: false,
+              error: err.message || "LinkedIn rejected that cookie. Export Cookie-Editor JSON from linkedin.com while you are logged in.",
+            });
+          }
+        }
         const displayName = name?.trim() || me.name;
         const sessionHeadline = headline?.trim() || me.headline || 'LinkedIn member';
 
@@ -514,7 +530,7 @@ Do not include any other text or introductory phrases.`,
           success: true,
           profile: cookieSession,
           canExtract: true,
-          message: 'Connected to your live LinkedIn session. Click Extract contacts to pull your network into CSV.'
+          message: 'Session saved. Extracting your contacts next — this is the only way to load your real network.'
         });
       }
 
@@ -590,13 +606,10 @@ Do not include any other text or introductory phrases.`,
           connectedAt: new Date().toISOString(),
           authType: 'profile-url'
         };
-        persistSession(req, urlSession);
-
-        return res.json({
-          success: true,
-          profile: urlSession,
+        return res.status(400).json({
+          success: false,
           canExtract: false,
-          message: 'Profile linked. To extract contacts, also connect with a Cookie-Editor session — LinkedIn will not list connections from a public URL alone.'
+          error: 'A profile URL cannot list your contacts. Use Browser Cookie: Cookie-Editor on linkedin.com → Export JSON → paste it here. Then Extract contacts.'
         });
       }
 
@@ -641,13 +654,25 @@ Do not include any other text or introductory phrases.`,
     const cookieJar = { liAt: jar.liAt, jsession: jar.jsession || '' };
     void (async () => {
       try {
-        const first = await extractFirstDegree(cookieJar, session.name, {
+        const firstResult = await extractFirstDegree(cookieJar, session.name, {
           max: 8000,
           onProgress: (n) => {
             const job = extractJobs.get(jobId);
             if (job) extractJobs.set(jobId, { ...job, count: n, first: n });
           },
         });
+        const first = firstResult.people;
+        if (!first.length) {
+          extractJobs.set(jobId, {
+            running: false,
+            done: true,
+            count: 0,
+            first: 0,
+            second: 0,
+            error: firstResult.error || "LinkedIn returned zero connections. Paste a fresh Cookie-Editor JSON.",
+          });
+          return;
+        }
         const second = await extractSecondDegree(cookieJar, session.name, {
           max: 2500,
           onProgress: (n) => {

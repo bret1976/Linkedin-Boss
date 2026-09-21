@@ -167,7 +167,14 @@ export default function App() {
             : st.error || `Done · ${st.count} contacts`,
         );
         if (!st.running) {
-          if (st.error) throw new Error(st.error);
+          if (st.error) {
+            autoExtracted.current = false;
+            throw new Error(st.error);
+          }
+          if (!st.count) {
+            autoExtracted.current = false;
+            throw new Error('LinkedIn returned zero contacts. Paste a fresh Cookie-Editor JSON from linkedin.com.');
+          }
           const netRes = await fetch('/api/linkedin/network');
           const netData = await netRes.json();
           if (userProfile && Array.isArray(netData.connections)) {

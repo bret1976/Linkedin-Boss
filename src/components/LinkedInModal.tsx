@@ -52,7 +52,7 @@ export default function LinkedInModal({
         name: displayName.trim() || undefined,
         headline: headline.trim() || undefined
       });
-      setActionSuccess('Connected to LinkedIn via Agent Reach browser session!');
+      setActionSuccess('Cookie session saved. Extract contacts will pull your real 1st-degree list.');
       setTimeout(() => setActionSuccess(null), 3000);
     } catch (e: any) {
       setActionError(e.message || 'Failed to connect session');
@@ -73,8 +73,7 @@ export default function LinkedInModal({
         name: displayName.trim() || undefined,
         headline: headline.trim() || undefined
       });
-      setActionSuccess('LinkedIn profile connected!');
-      setTimeout(() => setActionSuccess(null), 3000);
+      setActionSuccess('That URL cannot load contacts. Use the Browser Cookie tab.');
     } catch (e: any) {
       setActionError(e.message || 'Failed to link profile');
     }
