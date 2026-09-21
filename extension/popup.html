@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font: 13px/1.4 -apple-system, sans-serif; width: 280px; margin: 0; padding: 14px; color: #111; }
+      h1 { font-size: 14px; margin: 0 0 8px; }
+      p { margin: 0 0 10px; color: #555; font-size: 12px; }
+      label { display: block; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #666; margin-bottom: 4px; }
+      input { width: 100%; box-sizing: border-box; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; }
+      button { width: 100%; padding: 10px; background: #0077b5; color: #fff; border: 0; font-weight: 700; cursor: pointer; }
+      button:disabled { opacity: .5; }
+      #msg { margin-top: 8px; font-size: 12px; }
+      .ok { color: #0a7a32; }
+      .err { color: #b42318; }
+    </style>
+  </head>
+  <body>
+    <h1>LinkedIn Boss</h1>
+    <p>Stay logged into linkedin.com, then paste the connect code from the app.</p>
+    <label>Connect code</label>
+    <input id="code" placeholder="ABC123" maxlength="8" />
+    <label>App URL</label>
+    <input id="boss" value="http://127.0.0.1:3040" />
+    <button id="go">Send LinkedIn session</button>
+    <div id="msg"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn Boss Connect",
+  "version": "1.0.0",
+  "description": "Send your LinkedIn session to LinkedIn Boss so it can load your real contacts.",
+  "permissions": ["cookies"],
+  "host_permissions": [
+    "*://*.linkedin.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "action": {
+    "default_title": "Connect LinkedIn Boss",
+    "default_popup": "popup.html"
+  }
+}

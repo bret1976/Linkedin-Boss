@@ -25,9 +25,12 @@ import {
   createSession,
   deleteContacts,
   destroySession,
+  consumePairCode,
+  issuePairCode,
   loginUser,
   registerUser,
   saveLinkedIn,
+  userById,
   userFromToken,
 } from "./src/server/userStore";
 import { browserJob, captureLinkedInLogin, claimChromeSession, openChromeForLinkedIn } from "./src/server/browserConnect";
@@ -94,6 +97,16 @@ async function startServer() {
   const app = express();
   
   app.use(express.json({ limit: '50mb' }));
+  app.use((req, res, next) => {
+    const origin = String(req.headers.origin || "");
+    if (origin.startsWith("chrome-extension://") || /localhost|127\.0\.0\.1/.test(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    }
+    if (req.method === "OPTIONS") return res.status(204).end();
+    next();
+  });
 
   // Status endpoint for Gemini API state
   app.get('/api/gemini/status', async (req, res) => {
@@ -740,6 +753,55 @@ Do not include any other text or introductory phrases.`,
       });
     });
     res.json({ success: true, running: job.running, message: job.message });
+  });
+
+  app.get("/api/linkedin/pair-code", (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ success: false, error: "Sign in first." });
+    const profileUrl = String(req.query.profileUrl || "");
+    const code = issuePairCode(user.id, profileUrl);
+    res.json({ success: true, code, bossUrl: `http://127.0.0.1:${PORT}` });
+  });
+
+  app.post("/api/linkedin/extension-connect", async (req, res) => {
+    const code = String(req.body?.pairCode || "");
+    const pair = consumePairCode(code);
+    if (!pair) {
+      return res.status(400).json({ success: false, error: "Connect code is missing or expired. Generate a new one in LinkedIn Boss." });
+    }
+    const liAt = String(req.body?.liAt || req.body?.li_at || "");
+    let jsession = String(req.body?.jsession || req.body?.JSESSIONID || "").replace(/^"|"$/g, "");
+    if (!liAt || liAt.length < 20) {
+      return res.status(400).json({ success: false, error: "No LinkedIn li_at cookie. Log into linkedin.com in this Chrome, then try again." });
+    }
+    if (jsession && !jsession.startsWith("ajax:")) jsession = `ajax:${jsession}`;
+    const jar = { liAt, jsession };
+    if (!jar.jsession) {
+      try { jar.jsession = await discoverJsession(jar.liAt); } catch { /* ignore */ }
+    }
+    let me = { name: "LinkedIn member", headline: "", username: "", profile_url: pair.profileUrl || "https://www.linkedin.com", avatar_url: "" };
+    try {
+      me = await fetchVoyagerMe(jar);
+    } catch (e: any) {
+      return res.status(400).json({
+        success: false,
+        error: e.message || "LinkedIn rejected those cookies. Stay logged in on linkedin.com and retry.",
+      });
+    }
+    const cookieSession: LinkedInSession = {
+      id: `li_${Date.now()}`,
+      name: me.name,
+      headline: me.headline,
+      username: me.username,
+      profile_url: me.profile_url,
+      avatar_url: me.avatar_url,
+      location: "",
+      connectedAt: new Date().toISOString(),
+      authType: "agent-reach-cookie",
+      sessionCookie: JSON.stringify(jar),
+    };
+    saveLinkedIn(pair.userId, cookieSession as unknown as Record<string, unknown>);
+    res.json({ success: true, profile: cookieSession, canExtract: true });
   });
 
   app.post("/api/linkedin/open-chrome", async (req, res) => {

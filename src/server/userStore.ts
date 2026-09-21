@@ -144,6 +144,24 @@ export function deleteContacts(userId: string) {
   if (existsSync(csv)) unlinkSync(csv);
 }
 
+const pairCodes = new Map<string, { userId: string; profileUrl?: string; expires: number }>();
+
+export function issuePairCode(userId: string, profileUrl?: string) {
+  const code = randomBytes(3).toString("hex").toUpperCase();
+  pairCodes.set(code, { userId, profileUrl, expires: Date.now() + 15 * 60 * 1000 });
+  return code;
+}
+
+export function consumePairCode(code: string) {
+  const row = pairCodes.get(String(code || "").trim().toUpperCase());
+  if (!row || row.expires < Date.now()) return null;
+  return row;
+}
+
+export function userById(id: string) {
+  return readUsers().find((u) => u.id === id) || null;
+}
+
 export function cookieFromReq(cookieHeader: string | undefined, name: string) {
   if (!cookieHeader) return "";
   const parts = cookieHeader.split(";");
