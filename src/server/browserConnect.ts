@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "fs";
+import { createServer } from "net";
 import { homedir } from "os";
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
@@ -21,28 +22,64 @@ export function browserJob(userId: string) {
   return jobs.get(userId);
 }
 
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const s = createServer();
+    s.listen(0, "127.0.0.1", () => {
+      const addr = s.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      s.close((err) => (err ? reject(err) : resolve(port)));
+    });
+    s.on("error", reject);
+  });
+}
+
+function chromeArgs(port: number, dir: string, target: string) {
+  return [
+    `--remote-debugging-port=${port}`,
+    "--remote-allow-origins=*",
+    `--user-data-dir=${dir}`,
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-features=Translate,PrivacySandboxSettings4",
+    "--new-window",
+    target,
+  ];
+}
+
 export async function openChromeForLinkedIn(userId: string, profileUrl?: string) {
   const dir = path.join(homedir(), ".linkedin-boss", "chrome-profile", userId);
   mkdirSync(dir, { recursive: true });
-  const port = 9222 + Math.floor(Math.random() * 80);
+  const port = await freePort();
   const target = profileUrl?.includes("linkedin.com") ? profileUrl : "https://www.linkedin.com/login";
+  const args = chromeArgs(port, dir, target);
   const bin = chromeBinary();
-  const child = spawn(
-    bin,
-    [
-      `--remote-debugging-port=${port}`,
-      `--user-data-dir=${dir}`,
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-features=Translate",
-      target,
-    ],
-    { detached: false, stdio: "ignore" },
-  );
+
+  let child: ChildProcess;
+  if (process.platform === "darwin") {
+    // -n forces a NEW Chrome even if one is already open; otherwise flags (debug port) are ignored.
+    child = spawn("open", ["-na", "Google Chrome", "--args", ...args], { stdio: "ignore" });
+  } else {
+    child = spawn(bin, args, { stdio: "ignore" });
+  }
   procs.set(userId, child);
   debugPorts.set(userId, port);
-  await waitForCdp(port, 25000);
-  return { port, message: "Chrome is open on LinkedIn. Log in there, then come back and click I've logged in." };
+
+  try {
+    await waitForCdp(port, 40000);
+  } catch {
+    if (process.platform === "darwin") {
+      const retry = spawn(bin, args, { stdio: "ignore" });
+      procs.set(userId, retry);
+      await waitForCdp(port, 25000);
+    } else {
+      throw new Error("Chrome started but debugging port did not open.");
+    }
+  }
+  return {
+    port,
+    message: "A new Chrome window is open on your LinkedIn profile. Log in there if asked, then click I've logged in.",
+  };
 }
 
 export async function claimChromeSession(userId?: string, profileUrl?: string) {
