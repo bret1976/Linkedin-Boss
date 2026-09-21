@@ -83,8 +83,8 @@ export default function App() {
         setLiveNetworkMeta({ isLive: false, totalFound: 0 });
         setNetworkError(
           status.canExtract
-            ? 'Session is connected. Click Extract contacts to pull your LinkedIn 1st-degree list (and page 2nd-degree). That is how you get thousands of people — not a profile URL.'
-            : 'Connect LinkedIn with a Cookie-Editor session (li_at + JSESSIONID), then Extract contacts. A profile URL cannot list your 2,500 connections.',
+            ? "Session is ready. Click Load my LinkedIn contacts to extract your list."
+            : "Click Load my LinkedIn contacts. Chrome opens — log in there. We pull your real connections.",
         );
       }
     };
@@ -173,7 +173,7 @@ export default function App() {
           }
           if (!st.count) {
             autoExtracted.current = false;
-            throw new Error('LinkedIn returned zero contacts. Paste a fresh Cookie-Editor JSON from linkedin.com.');
+            throw new Error('LinkedIn returned zero contacts. Click Load my contacts again and sign in in the Chrome window.');
           }
           const netRes = await fetch('/api/linkedin/network');
           const netData = await netRes.json();
@@ -192,6 +192,36 @@ export default function App() {
     } finally {
       setExtracting(false);
       refreshLinkedInStatus();
+    }
+  };
+
+  const handleLoadContacts = async () => {
+    setExtracting(true);
+    setExtractStatus("Opening Chrome…");
+    setNetworkError(null);
+    try {
+      const start = await fetch("/api/linkedin/one-click", { method: "POST" });
+      const started = await start.json();
+      if (!started.success) throw new Error(started.error || "Could not start LinkedIn login");
+      if (!started.alreadyConnected) {
+        for (let i = 0; i < 240; i++) {
+          await new Promise((r) => setTimeout(r, 1500));
+          const st = await fetch("/api/linkedin/one-click-status").then((r) => r.json());
+          setExtractStatus(st.message || "Waiting for LinkedIn login…");
+          if (st.error) throw new Error(st.error);
+          if (st.done && st.connected) break;
+          if (st.done && !st.connected) throw new Error(st.error || "LinkedIn login did not finish.");
+        }
+        await refreshLinkedInStatus();
+      }
+      autoExtracted.current = true;
+      await handleExtractContacts();
+    } catch (e: any) {
+      autoExtracted.current = false;
+      setExtracting(false);
+      setNetworkError(e.message);
+      setConnectNotification(e.message);
+      setTimeout(() => setConnectNotification(null), 8000);
     }
   };
 
@@ -284,7 +314,7 @@ export default function App() {
                 <span>
                   {profiles.length
                     ? `${profiles.length} extracted contacts · globe shows top ${Math.min(GLOBE_LIMIT, profiles.length)} by match`
-                    : 'Click Extract contacts to load your full 1st-degree list'}
+                    : "Click Load my LinkedIn contacts"}
                 </span>
               </div>
             )}
@@ -297,7 +327,7 @@ export default function App() {
         <div className="absolute top-6 right-6 z-40">
           <LinkedInButton
             status={status}
-            onClick={() => setIsLinkedInModalOpen(true)}
+            onClick={() => (status.canExtract ? setIsLinkedInModalOpen(true) : void handleLoadContacts())}
           />
         </div>
       )}
@@ -331,7 +361,7 @@ export default function App() {
               setUserProfile(profile);
               setIsLoadingGlobe(true);
             }}
-            onOpenLinkedIn={() => setIsLinkedInModalOpen(true)}
+            onOpenLinkedIn={() => void handleLoadContacts()}
           />
         </div>
       ) : (
@@ -372,7 +402,7 @@ export default function App() {
                 <div className="max-w-md text-center space-y-3 bg-slate-900/90 border border-slate-700 p-6">
                   <p className="text-sm font-semibold text-white">No live people on the globe yet</p>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    {networkError || 'Connect LinkedIn with a Cookie-Editor session, then click Extract contacts. A profile URL alone cannot list your connections.'}
+                    {networkError || "Click Load my LinkedIn contacts. Chrome opens so you can log in. Then we extract your list."}
                   </p>
                   <div className="flex gap-2 justify-center">
                     <button
@@ -382,16 +412,14 @@ export default function App() {
                     >
                       Connect LinkedIn
                     </button>
-                    {status.canExtract && (
-                      <button
-                        type="button"
-                        onClick={handleExtractContacts}
-                        disabled={extracting}
-                        className="px-4 py-2 bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider"
-                      >
-                        Extract contacts
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleLoadContacts()}
+                      disabled={extracting}
+                      className="px-4 py-2 bg-[#0077b5] text-white text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                    >
+                      {extracting ? extractStatus || "Working…" : "Load my LinkedIn contacts"}
+                    </button>
                   </div>
                   {extractStatus && <p className="text-[11px] text-sky-300">{extractStatus}</p>}
                 </div>
@@ -428,17 +456,15 @@ export default function App() {
               transition={{ duration: 1, delay: 0.5 }}
               className="absolute bottom-6 right-6 flex items-center gap-3 z-30"
             >
-              {status.canExtract && (
-                <button
-                  type="button"
-                  onClick={handleExtractContacts}
-                  disabled={extracting}
-                  className="px-4 py-2 text-[10px] text-white bg-emerald-700 hover:bg-emerald-600 border border-emerald-500 tracking-widest uppercase cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  <span>{extracting ? extractStatus || 'Extracting…' : 'Extract contacts'}</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => void handleLoadContacts()}
+                disabled={extracting}
+                className="px-4 py-2 text-[10px] text-white bg-[#0077b5] hover:bg-[#006097] border border-sky-500 tracking-widest uppercase cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {extracting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                <span>{extracting ? extractStatus || "Working…" : "Load my LinkedIn contacts"}</span>
+              </button>
               <button
                 onClick={() => void handleStartFresh()}
                 className="px-4 py-2 text-[10px] text-slate-300 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700 tracking-widest uppercase transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm"

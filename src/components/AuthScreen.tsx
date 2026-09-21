@@ -36,7 +36,7 @@ export default function AuthScreen({ onReady }: { onReady: (email: string) => vo
         </div>
         <h1 className="text-2xl font-extrabold">{mode === 'register' ? 'Create your account' : 'Sign in'}</h1>
         <p className="text-xs text-gray-500">
-          Sign in, then connect LinkedIn with a Cookie-Editor export (li_at + JSESSIONID). Extract contacts pulls your real 1st-degree list. A profile URL will not load your 2,500 connections.
+          Create an account, then click one button. Chrome opens so you can log into LinkedIn. We pull your contacts from that session.
         </p>
         <input
           type="email"

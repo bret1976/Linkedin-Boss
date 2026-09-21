@@ -205,7 +205,7 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
                       Live LinkedIn Profile & Network Integration
                     </h4>
                     <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
-                      Connect with a Cookie-Editor session, then click Extract contacts. We pull your 1st-degree list into a CSV and score every person — you do not download an archive from LinkedIn yourself. A public profile URL cannot list connections.
+                      One button opens Chrome. Log into LinkedIn in that window. We capture the session and extract your contacts. No Cookie-Editor, no CSV download from LinkedIn.
                     </p>
                   </div>
                 </div>
@@ -217,7 +217,7 @@ export default function IntroScreen({ onStart, onOpenLinkedIn }: IntroScreenProp
                     className="w-full py-3.5 bg-[#0077b5] hover:bg-[#005c8d] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                   >
                     <Linkedin className="w-4 h-4" />
-                    <span>Open LinkedIn Connection Flow</span>
+                    <span>Load my LinkedIn contacts</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
 

@@ -29,6 +29,7 @@ import {
   saveLinkedIn,
   userFromToken,
 } from "./src/server/userStore";
+import { browserJob, captureLinkedInLogin } from "./src/server/browserConnect";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 
 const PORT = Number(process.env.PORT) || 3040;
@@ -708,6 +709,53 @@ Do not include any other text or introductory phrases.`,
         });
       }
     })();
+  });
+
+  app.post("/api/linkedin/one-click", async (req, res) => {
+    const user = currentUser(req);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: "Sign in first, then click the button. Chrome will open so you can log into LinkedIn.",
+      });
+    }
+    const existing = sessionFor(req);
+    if (existing?.sessionCookie) {
+      return res.json({ success: true, alreadyConnected: true, message: "Session already saved. Extracting contacts." });
+    }
+    const job = await captureLinkedInLogin(user.id);
+    res.json({ success: true, running: job.running, message: job.message });
+  });
+
+  app.get("/api/linkedin/one-click-status", async (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ success: false, error: "Not signed in" });
+    const job = browserJob(user.id);
+    if (!job) return res.json({ success: true, running: false, done: false });
+    if (job.done && job.jar && !job.error) {
+      const cookieSession: LinkedInSession = {
+        id: `li_${Date.now()}`,
+        name: job.profile?.name || "LinkedIn member",
+        headline: job.profile?.headline || "",
+        username: job.profile?.username,
+        profile_url: job.profile?.profile_url,
+        avatar_url: job.profile?.avatar_url,
+        location: "",
+        connectedAt: new Date().toISOString(),
+        authType: "agent-reach-cookie",
+        sessionCookie: JSON.stringify(job.jar),
+      };
+      persistSession(req, cookieSession);
+    }
+    res.json({
+      success: !job.error,
+      running: job.running,
+      done: job.done,
+      message: job.message,
+      error: job.error,
+      connected: Boolean(job.jar),
+      profile: job.profile,
+    });
   });
 
   app.get('/api/linkedin/extract-status', (req, res) => {
