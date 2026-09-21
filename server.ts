@@ -27,6 +27,7 @@ import {
   destroySession,
   consumePairCode,
   issuePairCode,
+  retirePairCode,
   loginUser,
   registerUser,
   saveLinkedIn,
@@ -652,7 +653,7 @@ Do not include any other text or introductory phrases.`,
     if (!session?.sessionCookie) {
       return res.status(400).json({
         success: false,
-        error: 'Extracting contacts requires your LinkedIn browser session (Cookie-Editor JSON with li_at). A profile URL cannot list other people’s connections.'
+        error: 'Connect LinkedIn first (extension or Open Chrome + I have logged in). A profile URL cannot list contacts.'
       });
     }
     let jar: { liAt?: string; jsession?: string } = {};
@@ -801,6 +802,7 @@ Do not include any other text or introductory phrases.`,
       sessionCookie: JSON.stringify(jar),
     };
     saveLinkedIn(pair.userId, cookieSession as unknown as Record<string, unknown>);
+    retirePairCode(code);
     res.json({ success: true, profile: cookieSession, canExtract: true });
   });
 

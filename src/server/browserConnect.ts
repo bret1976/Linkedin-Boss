@@ -55,7 +55,7 @@ export async function claimChromeSession(userId?: string, profileUrl?: string) {
       jar = null;
     }
   }
-  if (!jar) jar = await findOpenChromeSession();
+  if (!jar) jar = await findOpenChromeSession(userId);
   if (!jar) {
     return { error: "No LinkedIn session yet. Log into LinkedIn in the Chrome window, then click I've logged in again." };
   }
@@ -86,16 +86,22 @@ function chromeBinary() {
   return process.platform === "win32" ? "chrome" : "google-chrome";
 }
 
+async function cdpVersion(port: number, ms = 400) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(ms) });
+    if (res.ok) return (await res.json()) as { webSocketDebuggerUrl: string };
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 async function waitForCdp(port: number, ms = 20000) {
   const start = Date.now();
   while (Date.now() - start < ms) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (res.ok) return (await res.json()) as { webSocketDebuggerUrl: string };
-    } catch {
-      /* Chrome still starting */
-    }
-    await new Promise((r) => setTimeout(r, 300));
+    const version = await cdpVersion(port, 500);
+    if (version) return version;
+    await new Promise((r) => setTimeout(r, 250));
   }
   throw new Error("Chrome started but debugging port did not open.");
 }
@@ -146,12 +152,14 @@ function jarFromCookies(cookies: CdpCookie[]): CookieJar | null {
 }
 
 async function readLinkedInCookies(port: number): Promise<CookieJar | null> {
-  const version = await waitForCdp(port);
-  const pages = (await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json())) as {
-    type?: string;
-    url?: string;
-    webSocketDebuggerUrl?: string;
-  }[];
+  const version = await cdpVersion(port, 400);
+  if (!version) return null;
+  let pages: { type?: string; url?: string; webSocketDebuggerUrl?: string }[] = [];
+  try {
+    pages = (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(800) }).then((r) => r.json())) as typeof pages;
+  } catch {
+    pages = [];
+  }
   const page = pages.find((p) => p.type === "page" && /linkedin\.com/i.test(p.url || ""));
   const targets = [page?.webSocketDebuggerUrl, version.webSocketDebuggerUrl].filter(Boolean) as string[];
 
@@ -174,8 +182,10 @@ async function readLinkedInCookies(port: number): Promise<CookieJar | null> {
   return null;
 }
 
-async function findOpenChromeSession(): Promise<CookieJar | null> {
-  for (let port = 9222; port <= 9320; port++) {
+async function findOpenChromeSession(userId?: string): Promise<CookieJar | null> {
+  const preferred = userId ? debugPorts.get(userId) : undefined;
+  const ports = [...new Set([preferred, 9222, 9223, 9224, 9225, 9226].filter((p): p is number => Boolean(p)))];
+  for (const port of ports) {
     try {
       const jar = await readLinkedInCookies(port);
       if (jar) return jar;
@@ -226,7 +236,7 @@ export async function captureLinkedInLogin(
 
   void (async () => {
     try {
-      const already = await findOpenChromeSession();
+      const already = await findOpenChromeSession(userId);
       if (already) {
         job.message = "Found your LinkedIn Chrome window. Connecting…";
         await finish(already);

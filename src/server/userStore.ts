@@ -153,9 +153,14 @@ export function issuePairCode(userId: string, profileUrl?: string) {
 }
 
 export function consumePairCode(code: string) {
-  const row = pairCodes.get(String(code || "").trim().toUpperCase());
+  const key = String(code || "").trim().toUpperCase();
+  const row = pairCodes.get(key);
   if (!row || row.expires < Date.now()) return null;
   return row;
+}
+
+export function retirePairCode(code: string) {
+  pairCodes.delete(String(code || "").trim().toUpperCase());
 }
 
 export function userById(id: string) {
