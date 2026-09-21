@@ -18,7 +18,8 @@ go.addEventListener("click", async () => {
   try {
     const cookies = await chrome.cookies.getAll({ domain: ".linkedin.com" });
     const extra = await chrome.cookies.getAll({ domain: "www.linkedin.com" });
-    const all = [...cookies, ...extra];
+    const byUrl = await chrome.cookies.getAll({ url: "https://www.linkedin.com/" });
+    const all = [...cookies, ...extra, ...byUrl];
     const pick = (name) => all.find((c) => c.name === name)?.value || "";
     const liAt = pick("li_at");
     const jsession = (pick("JSESSIONID") || "").replace(/^"|"$/g, "");

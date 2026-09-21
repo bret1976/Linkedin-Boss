@@ -115,12 +115,25 @@ export default function LinkedInConnectFlow({
             LinkedIn only exposes contacts from your logged-in session. Use your real Chrome.
           </p>
           {code && (
-            <div className="bg-slate-50 border border-slate-200 p-3">
+            <div className="bg-slate-50 border border-slate-200 p-3 space-y-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">Connect code for the Chrome extension</div>
-              <div className="text-2xl font-mono font-bold tracking-[0.3em] text-[#0077b5] mt-1">{code}</div>
-              <p className="text-[11px] text-gray-500 mt-2 leading-relaxed">
-                Chrome → chrome://extensions → Developer mode → Load unpacked → folder <code>extension</code> in this project. Log into linkedin.com, click the extension, paste this code.
+              <button
+                type="button"
+                className="text-2xl font-mono font-bold tracking-[0.3em] text-[#0077b5]"
+                onClick={() => void navigator.clipboard.writeText(code)}
+              >
+                {code}
+              </button>
+              <p className="text-[11px] text-gray-500 leading-relaxed">
+                Click the code to copy. Then: Load unpacked the <code>extension</code> folder, log into linkedin.com, click the puzzle-piece extension, paste the code, Send session.
               </p>
+              <button
+                type="button"
+                className="w-full py-2 border border-slate-300 text-[11px] font-bold uppercase tracking-wider"
+                onClick={() => void fetch("/api/linkedin/open-extension-setup", { method: "POST" })}
+              >
+                Open Extensions page + extension folder
+              </button>
             </div>
           )}
           <button

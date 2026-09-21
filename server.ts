@@ -36,6 +36,7 @@ import {
 } from "./src/server/userStore";
 import { browserJob, captureLinkedInLogin, claimChromeSession, openChromeForLinkedIn } from "./src/server/browserConnect";
 import { existsSync, readFileSync, writeFileSync } from "fs";
+import { spawn } from "child_process";
 
 const PORT = Number(process.env.PORT) || 3040;
 
@@ -754,6 +755,32 @@ Do not include any other text or introductory phrases.`,
       });
     });
     res.json({ success: true, running: job.running, message: job.message });
+  });
+
+  app.post("/api/linkedin/open-extension-setup", (req, res) => {
+    const ext = path.join(process.cwd(), "extension");
+    try {
+      if (process.platform === "darwin") {
+        spawn("open", ["-R", ext], { stdio: "ignore" });
+        spawn("osascript", [
+          "-e",
+          'tell application "Google Chrome" to activate',
+          "-e",
+          'tell application "Google Chrome" to open location "chrome://extensions/"',
+          "-e",
+          'tell application "Google Chrome" to open location "https://www.linkedin.com/feed/"',
+        ], { stdio: "ignore" });
+      } else {
+        spawn("open", [ext], { stdio: "ignore" });
+      }
+      res.json({
+        success: true,
+        path: ext,
+        message: "Finder is showing the extension folder. In Chrome: Developer mode ON → Load unpacked → select that folder.",
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message, path: ext });
+    }
   });
 
   app.get("/api/linkedin/pair-code", (req, res) => {
