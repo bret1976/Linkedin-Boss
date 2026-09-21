@@ -30,7 +30,7 @@ import {
   saveLinkedIn,
   userFromToken,
 } from "./src/server/userStore";
-import { browserJob, captureLinkedInLogin } from "./src/server/browserConnect";
+import { browserJob, captureLinkedInLogin, claimChromeSession, openChromeForLinkedIn } from "./src/server/browserConnect";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 
 const PORT = Number(process.env.PORT) || 3040;
@@ -740,6 +740,43 @@ Do not include any other text or introductory phrases.`,
       });
     });
     res.json({ success: true, running: job.running, message: job.message });
+  });
+
+  app.post("/api/linkedin/open-chrome", async (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ success: false, error: "Sign in first." });
+    try {
+      const profileUrl = String(req.body?.profileUrl || "").trim();
+      const opened = await openChromeForLinkedIn(user.id, profileUrl || undefined);
+      res.json({ success: true, ...opened });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message || "Could not open Chrome. Install Google Chrome." });
+    }
+  });
+
+  app.post("/api/linkedin/claim-session", async (req, res) => {
+    const user = currentUser(req);
+    if (!user) return res.status(401).json({ success: false, error: "Sign in first." });
+    const profileUrl = String(req.body?.profileUrl || "").trim();
+    const claimed = await claimChromeSession(user.id, profileUrl || undefined);
+    if ("error" in claimed && claimed.error) {
+      return res.status(400).json({ success: false, error: claimed.error });
+    }
+    const { jar, profile } = claimed as { jar: { liAt: string; jsession: string }; profile: any };
+    const cookieSession: LinkedInSession = {
+      id: `li_${Date.now()}`,
+      name: profile?.name || "LinkedIn member",
+      headline: profile?.headline || "",
+      username: profile?.username,
+      profile_url: profile?.profile_url || profileUrl,
+      avatar_url: profile?.avatar_url,
+      location: "",
+      connectedAt: new Date().toISOString(),
+      authType: "agent-reach-cookie",
+      sessionCookie: JSON.stringify(jar),
+    };
+    persistSession(req, cookieSession);
+    res.json({ success: true, profile: cookieSession, canExtract: true });
   });
 
   app.get("/api/linkedin/one-click-status", async (req, res) => {

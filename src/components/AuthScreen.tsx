@@ -36,7 +36,7 @@ export default function AuthScreen({ onReady }: { onReady: (email: string) => vo
         </div>
         <h1 className="text-2xl font-extrabold">{mode === 'register' ? 'Create your account' : 'Sign in'}</h1>
         <p className="text-xs text-gray-500">
-          Create an account, paste your LinkedIn URL, then click Connect. Real Chrome opens so you can log in. We read the session from that window.
+          Register or sign in first. Next you will enter your LinkedIn profile, open Chrome, log in, then confirm so we can use your real contacts.
         </p>
         <input
           type="email"

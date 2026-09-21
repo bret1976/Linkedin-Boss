@@ -15,9 +15,65 @@ export type BrowserJob = {
 
 const jobs = new Map<string, BrowserJob>();
 const procs = new Map<string, ChildProcess>();
+const debugPorts = new Map<string, number>();
 
 export function browserJob(userId: string) {
   return jobs.get(userId);
+}
+
+export async function openChromeForLinkedIn(userId: string, profileUrl?: string) {
+  const dir = path.join(homedir(), ".linkedin-boss", "chrome-profile", userId);
+  mkdirSync(dir, { recursive: true });
+  const port = 9222 + Math.floor(Math.random() * 80);
+  const target = profileUrl?.includes("linkedin.com") ? profileUrl : "https://www.linkedin.com/login";
+  const bin = chromeBinary();
+  const child = spawn(
+    bin,
+    [
+      `--remote-debugging-port=${port}`,
+      `--user-data-dir=${dir}`,
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--disable-features=Translate",
+      target,
+    ],
+    { detached: false, stdio: "ignore" },
+  );
+  procs.set(userId, child);
+  debugPorts.set(userId, port);
+  await waitForCdp(port, 25000);
+  return { port, message: "Chrome is open on LinkedIn. Log in there, then come back and click I've logged in." };
+}
+
+export async function claimChromeSession(userId?: string, profileUrl?: string) {
+  let jar: CookieJar | null = null;
+  const port = userId ? debugPorts.get(userId) : undefined;
+  if (port) {
+    try {
+      jar = await readLinkedInCookies(port);
+    } catch {
+      jar = null;
+    }
+  }
+  if (!jar) jar = await findOpenChromeSession();
+  if (!jar) {
+    return { error: "No LinkedIn session yet. Log into LinkedIn in the Chrome window, then click I've logged in again." };
+  }
+  if (!jar.jsession) jar.jsession = await discoverJsession(jar.liAt);
+  let profile = {
+    name: "LinkedIn member",
+    headline: "",
+    username: "",
+    profile_url: profileUrl || "https://www.linkedin.com",
+    avatar_url: "",
+  };
+  try {
+    profile = await fetchVoyagerMe(jar);
+  } catch {
+    /* cookie is enough to extract contacts */
+  }
+  if (profileUrl) profile.profile_url = profile.profile_url || profileUrl;
+  return { jar, profile };
 }
 
 function chromeBinary() {

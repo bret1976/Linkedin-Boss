@@ -7,6 +7,8 @@ import GraphOverlayControls from './components/GraphOverlayControls';
 import LoadingOverlay from './components/LoadingOverlay';
 import LinkedInButton from './components/LinkedInButton';
 import LinkedInModal from './components/LinkedInModal';
+import AuthScreen from './components/AuthScreen';
+import LinkedInConnectFlow from './components/LinkedInConnectFlow';
 import ContactsTable from './components/ContactsTable';
 import { useLinkedIn } from './hooks/useLinkedIn';
 import { LinkedInMatchProfile, UserUploadedProfile } from './types/knowledgeGraph';
@@ -277,6 +279,20 @@ export default function App() {
 
   if (!authChecked) {
     return <div className="w-full h-full bg-white" />;
+  }
+  if (!accountEmail) {
+    return <AuthScreen onReady={(email) => setAccountEmail(email)} />;
+  }
+  if (!status.canExtract && !userProfile) {
+    return (
+      <LinkedInConnectFlow
+        onConnected={async () => {
+          await refreshLinkedInStatus();
+          autoExtracted.current = true;
+          await handleExtractContacts();
+        }}
+      />
+    );
   }
 
   return (
