@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync } from "fs";
+import { homedir } from "os";
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import { discoverJsession, fetchVoyagerMe, type CookieJar } from "./liveNetwork";
@@ -74,25 +75,66 @@ function cdp(wsUrl: string, method: string, params?: Record<string, unknown>) {
   });
 }
 
-async function readLinkedInCookies(port: number): Promise<CookieJar | null> {
-  const version = await waitForCdp(port);
-  const result = await cdp(version.webSocketDebuggerUrl, "Network.getAllCookies");
-  const cookies = (result?.cookies || []) as { name: string; value: string; domain?: string }[];
-  const liAt = cookies.find((c) => c.name === "li_at" && /linkedin/i.test(c.domain || ""))?.value
-    || cookies.find((c) => c.name === "li_at")?.value
-    || "";
-  const jsessionRaw = cookies.find((c) => c.name === "JSESSIONID" && /linkedin/i.test(c.domain || ""))?.value
-    || cookies.find((c) => c.name === "JSESSIONID")?.value
-    || "";
-  const jsession = jsessionRaw.replace(/^"|"$/g, "");
+type CdpCookie = { name: string; value: string; domain?: string };
+
+function jarFromCookies(cookies: CdpCookie[]): CookieJar | null {
+  const li = cookies.filter((c) => /linkedin/i.test(c.domain || "") || /li_at|JSESSIONID/i.test(c.name));
+  const pool = li.length ? li : cookies;
+  const liAt = pool.find((c) => c.name === "li_at")?.value || "";
+  const jsessionRaw = (pool.find((c) => c.name === "JSESSIONID")?.value || "").replace(/^"|"$/g, "");
   if (liAt.length < 20) return null;
   return {
     liAt,
-    jsession: jsession.startsWith("ajax:") ? jsession : jsession ? `ajax:${jsession}` : "",
+    jsession: jsessionRaw.startsWith("ajax:") ? jsessionRaw : jsessionRaw ? `ajax:${jsessionRaw}` : "",
   };
 }
 
-export async function captureLinkedInLogin(userId: string, profileUrl?: string): Promise<BrowserJob> {
+async function readLinkedInCookies(port: number): Promise<CookieJar | null> {
+  const version = await waitForCdp(port);
+  const pages = (await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json())) as {
+    type?: string;
+    url?: string;
+    webSocketDebuggerUrl?: string;
+  }[];
+  const page = pages.find((p) => p.type === "page" && /linkedin\.com/i.test(p.url || ""));
+  const targets = [page?.webSocketDebuggerUrl, version.webSocketDebuggerUrl].filter(Boolean) as string[];
+
+  for (const wsUrl of targets) {
+    for (const [method, params] of [
+      ["Storage.getCookies", undefined],
+      ["Network.getCookies", { urls: ["https://www.linkedin.com/", "https://www.linkedin.com/feed/"] }],
+      ["Network.getAllCookies", undefined],
+    ] as const) {
+      try {
+        const result = await cdp(wsUrl, method, params as Record<string, unknown> | undefined);
+        const cookies = (result?.cookies || []) as CdpCookie[];
+        const jar = jarFromCookies(cookies);
+        if (jar) return jar;
+      } catch {
+        /* next API — Chrome 153 removed Network.getAllCookies on the browser target */
+      }
+    }
+  }
+  return null;
+}
+
+async function findOpenChromeSession(): Promise<CookieJar | null> {
+  for (let port = 9222; port <= 9320; port++) {
+    try {
+      const jar = await readLinkedInCookies(port);
+      if (jar) return jar;
+    } catch {
+      /* no debugger on this port */
+    }
+  }
+  return null;
+}
+
+export async function captureLinkedInLogin(
+  userId: string,
+  profileUrl?: string,
+  onCaptured?: (jar: CookieJar, profile: BrowserJob["profile"]) => void,
+): Promise<BrowserJob> {
   const existing = jobs.get(userId);
   if (existing?.running) return existing;
 
@@ -103,8 +145,42 @@ export async function captureLinkedInLogin(userId: string, profileUrl?: string):
   };
   jobs.set(userId, job);
 
+  const finish = async (jar: CookieJar) => {
+    if (!jar.jsession) jar.jsession = await discoverJsession(jar.liAt);
+    let profile = {
+      name: "LinkedIn member",
+      headline: "",
+      username: "",
+      profile_url: profileUrl || "https://www.linkedin.com",
+      avatar_url: "",
+    };
+    try {
+      profile = await fetchVoyagerMe(jar);
+    } catch {
+      /* cookie is enough */
+    }
+    if (profileUrl && !profile.profile_url) profile.profile_url = profileUrl;
+    job.jar = jar;
+    job.profile = profile;
+    job.running = false;
+    job.done = true;
+    job.message = `Signed in as ${profile.name}. Loading contacts…`;
+    onCaptured?.(jar, profile);
+  };
+
   void (async () => {
-    const dir = path.join(process.cwd(), "data", "chrome-profile", userId);
+    try {
+      const already = await findOpenChromeSession();
+      if (already) {
+        job.message = "Found your LinkedIn Chrome window. Connecting…";
+        await finish(already);
+        return;
+      }
+    } catch {
+      /* open a new window */
+    }
+
+    const dir = path.join(homedir(), ".linkedin-boss", "chrome-profile", userId);
     mkdirSync(dir, { recursive: true });
     const port = 9222 + Math.floor(Math.random() * 80);
     const target = profileUrl?.includes("linkedin.com")
@@ -147,27 +223,7 @@ export async function captureLinkedInLogin(userId: string, profileUrl?: string):
         job.error = "Timed out. Click Connect again and sign into LinkedIn in the Chrome window that opens.";
         return;
       }
-      if (!jar.jsession) jar.jsession = await discoverJsession(jar.liAt);
-
-      let profile = {
-        name: "LinkedIn member",
-        headline: "",
-        username: "",
-        profile_url: profileUrl || "https://www.linkedin.com",
-        avatar_url: "",
-      };
-      try {
-        profile = await fetchVoyagerMe(jar);
-      } catch {
-        /* extract can still run with the cookie */
-      }
-      if (profileUrl && !profile.profile_url) profile.profile_url = profileUrl;
-
-      job.jar = jar;
-      job.profile = profile;
-      job.running = false;
-      job.done = true;
-      job.message = `Signed in as ${profile.name}. Loading contacts…`;
+      await finish(jar);
     } catch (err: any) {
       job.running = false;
       job.done = true;

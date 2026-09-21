@@ -724,7 +724,21 @@ Do not include any other text or introductory phrases.`,
       return res.json({ success: true, alreadyConnected: true, message: "Session already saved. Extracting contacts." });
     }
     const profileUrl = String(req.body?.profileUrl || "").trim();
-    const job = await captureLinkedInLogin(user.id, profileUrl || undefined);
+    const uid = user.id;
+    const job = await captureLinkedInLogin(uid, profileUrl || undefined, (jar, profile) => {
+      saveLinkedIn(uid, {
+        id: `li_${Date.now()}`,
+        name: profile?.name || "LinkedIn member",
+        headline: profile?.headline || "",
+        username: profile?.username,
+        profile_url: profile?.profile_url,
+        avatar_url: profile?.avatar_url,
+        location: "",
+        connectedAt: new Date().toISOString(),
+        authType: "agent-reach-cookie",
+        sessionCookie: JSON.stringify(jar),
+      });
+    });
     res.json({ success: true, running: job.running, message: job.message });
   });
 
