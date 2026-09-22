@@ -105,16 +105,27 @@ export default function App() {
       const activeUser: UserUploadedProfile = {
         name: status.profile.name,
         headline: headline || 'LinkedIn member',
-        company: at?.[1]?.trim() || '',
-        industry: /venture|capital/i.test(headline) ? 'Venture Capital' : /ai|software|engineer/i.test(headline) ? 'Technology' : '',
+        company: status.profile.company || at?.[1]?.trim() || '',
+        industry: status.profile.industry || (/venture|capital/i.test(headline) ? 'Venture Capital' : /ai|software|engineer|video|studio/i.test(headline) ? 'Technology' : ''),
         location: status.profile.location || '',
-        skills: headline.split(/[|,•]/).map(s => s.trim()).filter(s => s.length > 2 && s.length < 40).slice(0, 6),
+        skills: (status.profile.skills && status.profile.skills.length
+          ? status.profile.skills
+          : headline.split(/[|,•]/).map(s => s.trim()).filter(s => s.length > 2 && s.length < 40)
+        ).slice(0, 8),
         avatarUrl: status.profile.avatar_url || ''
       };
       setUserProfile(activeUser);
       setIsLoadingGlobe(true);
     }
   }, [status.canExtract, status.profile]);
+
+  useEffect(() => {
+    if (!userProfile?.headline || !profiles.length) return;
+    setProfiles((prev) => {
+      if (!prev.length) return prev;
+      return generateAnalyzedProfiles(userProfile, 20000, prev);
+    });
+  }, [userProfile?.headline, userProfile?.company, (userProfile?.skills || []).join("|")]);
 
   const handleStartFresh = async () => {
     autoExtracted.current = false;
@@ -145,7 +156,7 @@ export default function App() {
       return profiles.filter(p => p.graphLayer === 'executive').length;
     }
     if (activeOverlayId === 'high-match') {
-      return profiles.filter(p => p.matchScore >= 90).length;
+      return profiles.filter(p => p.matchScore >= 70).length;
     }
     return profiles.length;
   }, [profiles, activeOverlayId]);

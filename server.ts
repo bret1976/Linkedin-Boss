@@ -12,6 +12,7 @@ import {
   extractFirstDegree,
   extractSecondDegree,
   fetchVoyagerConnections,
+  fetchVoyagerFullProfile,
   fetchVoyagerMe,
   parseLinkedInCookies,
   voyagerHeaders,
@@ -368,6 +369,7 @@ Do not include any other text or introductory phrases.`,
     profile_url?: string;
     company?: string;
     industry?: string;
+    skills?: string[];
     location?: string;
     connectedAt: string;
     authType: 'agent-reach-cookie' | 'profile-url' | 'quick-session';
@@ -477,6 +479,9 @@ Do not include any other text or introductory phrases.`,
         avatar_url: session.avatar_url,
         profile_url: session.profile_url,
         location: session.location,
+        company: session.company,
+        industry: session.industry,
+        skills: session.skills,
         connectedAt: session.connectedAt,
         authType: session.authType
       } : null,
@@ -517,7 +522,7 @@ Do not include any other text or introductory phrases.`,
           avatar_url: "",
         };
         try {
-          me = await fetchVoyagerMe(jar);
+          me = await fetchVoyagerFullProfile(jar);
         } catch (err: any) {
           if (!jar.jsession) {
             return res.status(400).json({
@@ -536,7 +541,10 @@ Do not include any other text or introductory phrases.`,
           username: me.username,
           profile_url: me.profile_url,
           avatar_url: me.avatar_url,
-          location: '',
+          location: (me as any).location || '',
+          company: (me as any).company,
+          industry: (me as any).industry,
+          skills: (me as any).skills,
           connectedAt: new Date().toISOString(),
           authType: 'agent-reach-cookie',
           sessionCookie: JSON.stringify(jar)
@@ -807,9 +815,19 @@ Do not include any other text or introductory phrases.`,
     if (!jar.jsession) {
       try { jar.jsession = await discoverJsession(jar.liAt); } catch { /* ignore */ }
     }
-    let me = { name: "LinkedIn member", headline: "", username: "", profile_url: pair.profileUrl || "https://www.linkedin.com", avatar_url: "" };
+    let me: {
+      name: string;
+      headline: string;
+      username: string;
+      profile_url: string;
+      avatar_url: string;
+      location?: string;
+      company?: string;
+      industry?: string;
+      skills?: string[];
+    } = { name: "LinkedIn member", headline: "", username: "", profile_url: pair.profileUrl || "https://www.linkedin.com", avatar_url: "" };
     try {
-      me = await fetchVoyagerMe(jar);
+      me = await fetchVoyagerFullProfile(jar);
     } catch (e: any) {
       return res.status(400).json({
         success: false,
@@ -823,7 +841,10 @@ Do not include any other text or introductory phrases.`,
       username: me.username,
       profile_url: me.profile_url,
       avatar_url: me.avatar_url,
-      location: "",
+      location: me.location || "",
+      company: me.company,
+      industry: me.industry,
+      skills: me.skills,
       connectedAt: new Date().toISOString(),
       authType: "agent-reach-cookie",
       sessionCookie: JSON.stringify(jar),

@@ -6,6 +6,9 @@ export interface LinkedInProfile {
   avatar_url?: string;
   profile_url?: string;
   location?: string;
+  company?: string;
+  industry?: string;
+  skills?: string[];
   connectedAt?: string;
   authType: 'agent-reach-cookie' | 'profile-url' | 'quick-session';
 }

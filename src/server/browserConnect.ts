@@ -3,7 +3,7 @@ import { createServer } from "net";
 import { homedir } from "os";
 import { spawn, type ChildProcess } from "child_process";
 import path from "path";
-import { discoverJsession, fetchVoyagerMe, type CookieJar } from "./liveNetwork";
+import { discoverJsession, fetchVoyagerFullProfile, fetchVoyagerMe, type CookieJar } from "./liveNetwork";
 
 export type BrowserJob = {
   running: boolean;
@@ -105,9 +105,13 @@ export async function claimChromeSession(userId?: string, profileUrl?: string) {
     avatar_url: "",
   };
   try {
-    profile = await fetchVoyagerMe(jar);
+    profile = await fetchVoyagerFullProfile(jar);
   } catch {
-    /* cookie is enough to extract contacts */
+    try {
+      profile = await fetchVoyagerMe(jar);
+    } catch {
+      /* cookie is enough to extract contacts */
+    }
   }
   if (profileUrl) profile.profile_url = profile.profile_url || profileUrl;
   return { jar, profile };
@@ -258,9 +262,13 @@ export async function captureLinkedInLogin(
       avatar_url: "",
     };
     try {
-      profile = await fetchVoyagerMe(jar);
+      profile = await fetchVoyagerFullProfile(jar);
     } catch {
-      /* cookie is enough */
+      try {
+        profile = await fetchVoyagerMe(jar);
+      } catch {
+        /* cookie is enough */
+      }
     }
     if (profileUrl && !profile.profile_url) profile.profile_url = profileUrl;
     job.jar = jar;

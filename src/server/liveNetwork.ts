@@ -120,9 +120,16 @@ function industryFromHeadline(headline: string): string {
   return "Professional Services";
 }
 
-function companyFromHeadline(headline: string): string {
-  const m = headline.match(/(?:at|@)\s+([^|,•\n]+)/i);
-  return (m?.[1] || "").trim();
+export function companyFromHeadline(headline: string): string {
+  const text = headline || "";
+  const at = text.match(/(?:^|\s)(?:at|@)\s+([^|,•\n]+)/i);
+  if (at?.[1]) return at[1].replace(/\s+/g, " ").trim();
+  const parts = text.split(/\s*[|•]\s*/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length >= 2) {
+    const last = parts[parts.length - 1].replace(/^(?:at|@)\s+/i, "");
+    if (last.length > 1 && last.length < 80) return last;
+  }
+  return "";
 }
 
 function looksLikePerson(title: string, extract: string): boolean {
@@ -202,6 +209,67 @@ export async function fetchVoyagerMe(jar: CookieJar) {
     username: publicId,
     profile_url: publicId ? `https://www.linkedin.com/in/${publicId}` : "https://www.linkedin.com",
     avatar_url: "",
+  };
+}
+
+export async function fetchVoyagerFullProfile(jar: CookieJar, publicId = "") {
+  const me = await fetchVoyagerMe(jar);
+  const id = publicId || me.username;
+  const headlineBits = [me.headline];
+  const companies: string[] = [];
+  const skills: string[] = [];
+  let location = "";
+  let industry = industryFromHeadline(me.headline);
+
+  const urls = id
+    ? [
+        `https://www.linkedin.com/voyager/api/identity/profiles/${encodeURIComponent(id)}/profileView`,
+        `https://www.linkedin.com/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=${encodeURIComponent(id)}`,
+      ]
+    : [];
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { headers: voyagerHeaders(jar) });
+      if (!res.ok) continue;
+      const data = (await res.json()) as Record<string, unknown>;
+      const profile = (data.profile as Record<string, unknown>) || {};
+      if (profile.headline) headlineBits.push(String(profile.headline));
+      if (profile.industryName) industry = String(profile.industryName);
+      const loc = profile.geoLocationName || profile.locationName;
+      if (loc) location = String(loc);
+      const posView = data.positionView as { elements?: Record<string, unknown>[] } | undefined;
+      for (const pos of posView?.elements || []) {
+        const title = String(pos.title || "");
+        const company = String(pos.companyName || (pos.company as { name?: string } | undefined)?.name || "");
+        if (title) headlineBits.push(title);
+        if (company) companies.push(company);
+      }
+      for (const item of collectMinis(data)) {
+        const type = String(item["$type"] || item.type || "");
+        if (/[Pp]osition/.test(type) || item.companyName) {
+          const company = String(item.companyName || "");
+          const title = String(item.title || "");
+          if (company) companies.push(company);
+          if (title) headlineBits.push(title);
+        }
+        if (/[Ss]kill/.test(type) && item.name) skills.push(String(item.name));
+      }
+      break;
+    } catch {
+      /* try next */
+    }
+  }
+
+  const headline = headlineBits.filter(Boolean)[0] || me.headline;
+  const company = companies[0] || companyFromHeadline(headline);
+  const extraSkills = skillsFromText(headline, company, industry, ...skills);
+  return {
+    ...me,
+    headline,
+    company,
+    industry,
+    location,
+    skills: [...new Set([...skills, ...extraSkills])].slice(0, 12),
   };
 }
 
