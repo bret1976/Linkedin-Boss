@@ -17,6 +17,7 @@ import { generateAnalyzedProfiles } from './utils/graphAnalysis';
 import { Download, Loader2, RefreshCw, CheckCircle2, Globe2 } from 'lucide-react';
 
 const GLOBE_LIMIT = 250;
+const MIN_MATCH = 50;
 
 export default function App() {
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
@@ -146,22 +147,27 @@ export default function App() {
   }, [activeOverlayId]);
 
   const filteredMatchCount = useMemo(() => {
+    const pool = profiles.filter((p) => p.matchScore >= MIN_MATCH);
     if (activeOverlayId === 'venture') {
-      return profiles.filter(p => p.graphLayer === 'venture').length;
+      return pool.filter(p => p.graphLayer === 'venture').length;
     }
     if (activeOverlayId === 'ai-tech') {
-      return profiles.filter(p => p.graphLayer === 'ai-tech').length;
+      return pool.filter(p => p.graphLayer === 'ai-tech').length;
     }
     if (activeOverlayId === 'executive') {
-      return profiles.filter(p => p.graphLayer === 'executive').length;
+      return pool.filter(p => p.graphLayer === 'executive').length;
     }
     if (activeOverlayId === 'high-match') {
-      return profiles.filter(p => p.matchScore >= 70).length;
+      return pool.filter(p => p.matchScore >= 70).length;
     }
-    return profiles.length;
+    return pool.length;
   }, [profiles, activeOverlayId]);
 
-  const globeProfiles = useMemo(() => profiles.slice(0, GLOBE_LIMIT), [profiles]);
+  const visibleProfiles = useMemo(
+    () => profiles.filter((p) => p.matchScore >= MIN_MATCH),
+    [profiles],
+  );
+  const globeProfiles = useMemo(() => visibleProfiles.slice(0, GLOBE_LIMIT), [visibleProfiles]);
 
   const handleExtractContacts = async () => {
     setExtracting(true);
@@ -346,7 +352,7 @@ export default function App() {
                 <Globe2 className="w-3 h-3 text-sky-400" />
                 <span>
                   {profiles.length
-                    ? `${profiles.length} extracted contacts · globe shows top ${Math.min(GLOBE_LIMIT, profiles.length)} by match`
+                    ? `${visibleProfiles.length} of ${profiles.length} at ${MIN_MATCH}%+ match · globe top ${Math.min(GLOBE_LIMIT, visibleProfiles.length)}`
                     : "Click Load my LinkedIn contacts"}
                 </span>
               </div>
@@ -435,9 +441,13 @@ export default function App() {
             ) : !isLoadingGlobe ? (
               <div className="absolute inset-0 flex items-center justify-center p-8">
                 <div className="max-w-md text-center space-y-3 bg-slate-900/90 border border-slate-700 p-6">
-                  <p className="text-sm font-semibold text-white">No live people on the globe yet</p>
+                  <p className="text-sm font-semibold text-white">
+                    {profiles.length ? `No contacts at ${MIN_MATCH}%+ match` : "No live people on the globe yet"}
+                  </p>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    {networkError || "Click Load my LinkedIn contacts. Chrome opens so you can log in. Then we extract your list."}
+                    {profiles.length
+                      ? `Extracted ${profiles.length} people; none scored ${MIN_MATCH}% or higher against your profile.`
+                      : networkError || "Click Load my LinkedIn contacts. Chrome opens so you can log in. Then we extract your list."}
                   </p>
                   <div className="flex gap-2 justify-center">
                     <button
@@ -481,7 +491,7 @@ export default function App() {
           )}
 
           {!isLoadingGlobe && !selectedProfile && (
-            <ContactsTable profiles={profiles} onSelect={setSelectedProfile} />
+            <ContactsTable profiles={visibleProfiles} onSelect={setSelectedProfile} />
           )}
 
           {!isLoadingGlobe && !selectedProfile && (
